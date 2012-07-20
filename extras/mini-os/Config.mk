@@ -2,7 +2,10 @@
 MINI-OS_ROOT=$(XEN_ROOT)/extras/mini-os
 export MINI-OS_ROOT
 
-libc = $(stubdom)
+#libc = $(stubdom)
+libc = y
+lwip = y
+LWIPDIR=$(XEN_ROOT)/stubdom/lwip-x86_64
 
 XEN_INTERFACE_VERSION := 0x00030205
 export XEN_INTERFACE_VERSION

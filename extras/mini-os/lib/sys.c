@@ -40,9 +40,11 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <assert.h>
-#include <dirent.h>
+//#include <dirent.h>
 #include <stdlib.h>
 #include <math.h>
+
+#include <posix/pthread.h>
 
 #ifdef HAVE_LWIP
 #include <lwip/sockets.h>
@@ -211,8 +213,25 @@ int open(const char *pathname, int flags, ...)
         return posix_openpt(flags);
     if (!strncmp(pathname,SAVE_PATH,strlen(SAVE_PATH)))
         return open_savefile(pathname, flags & O_WRONLY);
+    if (!strcmp(pathname, "/etc/nsd/nsd.conf")) {
+	if ((flags & 3) != O_RDONLY) {
+	    errno = -EPERM;
+	    return -1;
+	}
+	fd = alloc_fd(FTYPE_CONFFILE);
+	printk("open(%s) -> %d\n", pathname, fd);
+	files[fd].file.offset = 0;
+	return fd;
+    }
+
+    printk("open(%s, %d) -> -1\n", pathname, flags);
     errno = EIO;
     return -1;
+}
+
+int open64(const char *pathname, int flags, int mode)
+{
+    return open(pathname, flags, mode);
 }
 
 int isatty(int fd)
@@ -270,6 +289,24 @@ int read(int fd, void *buf, size_t nbytes)
 	    }
 	    return ret * sizeof(union xenfb_in_event);
         }
+	case FTYPE_CONFFILE: {
+	    int n;
+#define CONFIGURATION				\
+"server:\n"					\
+"\n"						\
+"zone:\n"					\
+"    name: \"example.com\"\n"			\
+"    zonefile: \"example.com.zone\"\n"
+	    if (files[fd].file.offset >= sizeof(CONFIGURATION) - 1)
+		    n = 0;
+	    else
+		    n = sizeof(CONFIGURATION) - 1 - files[fd].file.offset;
+	    if (n >= nbytes)
+		    n = nbytes;
+	    memcpy(buf, CONFIGURATION + files[fd].file.offset, n);
+	    files[fd].file.offset += n;
+	    return n;
+	}
 	default:
 	    break;
     }
@@ -412,6 +449,12 @@ int fstat(int fd, struct stat *buf)
 	    buf->st_ctime = time(NULL);
 	    return 0;
 	}
+	case FTYPE_CONFFILE: {
+	    buf->st_mode = S_IFREG | S_IRUSR;
+	    buf->st_size = sizeof(CONFIGURATION) - 1;
+	    buf->st_blocks = 1;
+	    return 0;
+	}
 	default:
 	    break;
     }
@@ -419,6 +462,11 @@ int fstat(int fd, struct stat *buf)
     printk("statf(%d): Bad descriptor\n", fd);
     errno = EBADF;
     return -1;
+}
+
+int fstat64(int fd, struct stat *buf)
+{
+    return fstat(fd, buf);
 }
 
 int ftruncate(int fd, off_t length)
@@ -468,6 +516,7 @@ int fcntl(int fd, int cmd, ...)
     }
 }
 
+#if 0
 DIR *opendir(const char *name)
 {
     DIR *ret;
@@ -496,6 +545,7 @@ int closedir(DIR *dir)
     free(dir);
     return 0;
 }
+#endif
 
 /* We assume that only the main thread calls select(). */
 
@@ -1156,14 +1206,15 @@ int nice(int inc)
     return 0;
 }
 
+int puts(const char *f)
+{
+    return printf("%s", f);
+}
 
 /* Not supported by FS yet.  */
 unsupported_function_crash(link);
 unsupported_function(int, readlink, -1);
 unsupported_function_crash(umask);
-
-/* We could support that.  */
-unsupported_function_log(int, chdir, -1);
 
 /* No dynamic library support.  */ 
 unsupported_function_log(void *, dlopen, NULL);

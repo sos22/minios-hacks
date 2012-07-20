@@ -61,7 +61,7 @@ static void call_main(void *p)
     //sleep(1);
 
 #ifndef CONFIG_GRUB
-    sparse((unsigned long) &__app_bss_start, &__app_bss_end - &__app_bss_start);
+    //    sparse((unsigned long) &__app_bss_start, &__app_bss_end - &__app_bss_start);
 #if defined(HAVE_LWIP) && !defined(CONFIG_QEMU)
     start_networking();
 #endif

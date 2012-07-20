@@ -147,6 +147,7 @@ enum fd_type {
     FTYPE_FB,
     FTYPE_MEM,
     FTYPE_SAVEFILE,
+	FTYPE_CONFFILE,
 };
 
 #define MAX_EVTCHN_PORTS 16

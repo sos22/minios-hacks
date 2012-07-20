@@ -115,6 +115,11 @@ clean:	arch_clean
 	$(RM) $(OBJ_DIR)/lwip.a $(LWO)
 	rm -f tags TAGS
 
+nsd.db: nsd.conf example.com.zone nsd-3.2.12/zonec
+	nsd-3.2.12/zonec -c nsd.conf -d . -f nsd.db
+nsd.db.c: nsd.db ./c_escape_binary.py
+	./c_escape_binary.py __nsd_database < nsd.db > nsd.db.c
+sys.o: nsd.db.c
 
 define all_sources
      ( find . -follow -name SCCS -prune -o -name '*.[chS]' -print )

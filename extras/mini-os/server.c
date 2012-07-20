@@ -231,9 +231,6 @@ int
 server_init(struct nsd *nsd)
 {
 	size_t i;
-#if defined(SO_REUSEADDR) || (defined(INET6) && (defined(IPV6_V6ONLY) || defined(IPV6_USE_MIN_MTU) || defined(IPV6_MTU)))
-	int on = 1;
-#endif
 
 	/* UDP */
 
@@ -332,6 +329,7 @@ server_init(struct nsd *nsd)
 			struct sockaddr_in addr;
 			memset(&addr, 0, sizeof(addr));
 			addr.sin_port = htons(53);
+			addr.sin_family = AF_INET;
 			if (bind(nsd->udp[i].s, (struct sockaddr *) &addr, sizeof(addr)) != 0) {
 				log_msg(LOG_ERR, "can't bind udp socket: %s", strerror(errno));
 				return -1;
@@ -355,11 +353,13 @@ server_init(struct nsd *nsd)
 			return -1;
 		}
 
+#if 0
 #ifdef	SO_REUSEADDR
 		if (setsockopt(nsd->tcp[i].s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {
 			log_msg(LOG_ERR, "setsockopt(..., SO_REUSEADDR, ...) failed: %s", strerror(errno));
 		}
 #endif /* SO_REUSEADDR */
+#endif
 
 #if defined(INET6) && defined(IPV6_V6ONLY)
 		if (nsd->tcp[i].addr->ai_family == AF_INET6 &&
@@ -381,6 +381,7 @@ server_init(struct nsd *nsd)
 			struct sockaddr_in addr;
 			memset(&addr, 0, sizeof(addr));
 			addr.sin_port = htons(53);
+			addr.sin_family = AF_INET;
 			if (bind(nsd->tcp[i].s, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
 				log_msg(LOG_ERR, "can't bind tcp socket: %s", strerror(errno));
 				return -1;

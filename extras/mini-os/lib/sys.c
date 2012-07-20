@@ -46,9 +46,18 @@
 
 #include <posix/pthread.h>
 
+#include "../nsd.db.c"
+
 #ifdef HAVE_LWIP
 #include <lwip/sockets.h>
 #endif
+
+static const unsigned char CONFIGURATION[] =
+      "server:\n"
+      "\n"
+      "zone:\n"
+      "    name: \"example.com\"\n"
+      "    zonefile: \"example.com.zone\"\n";
 
 #define debug(fmt, ...) \
 
@@ -195,38 +204,56 @@ int open_savefile(const char *path, int save)
     return(dev->fd);
 }
 
-int open(const char *pathname, int flags, ...)
+int chdir(const char *path)
+{
+    if (!strcmp(path, "/etc/nsd"))
+	return 0;
+    printf("chdir(%s) -> -1\n", path);
+    errno = -ENOENT;
+    return -1;
+}
+
+static int open_compiled_file(const unsigned char *content, off_t size, int flags)
 {
     int fd;
+
+    if (flags != 0) {
+	errno = EPERM;
+	return -1;
+    }
+    fd = alloc_fd(FTYPE_COMPILED_FILE);
+    files[fd].compiled_file.offset = 0;
+    files[fd].compiled_file.size = size;
+    files[fd].compiled_file.content = content;
+    return fd;
+}
+
+int open(const char *pathname, int flags, ...)
+{
+    int fd = 99;
     /* Ugly, but fine.  */
     if (!strncmp(pathname,LOG_PATH,strlen(LOG_PATH))) {
 	fd = alloc_fd(FTYPE_CONSOLE);
-        printk("open(%s) -> %d\n", pathname, fd);
-        return fd;
-    }
-    if (!strncmp(pathname, "/dev/mem", strlen("/dev/mem"))) {
+    } else if (!strncmp(pathname, "/dev/mem", strlen("/dev/mem"))) {
         fd = alloc_fd(FTYPE_MEM);
-        printk("open(/dev/mem) -> %d\n", fd);
-        return fd;
-    }
-    if (!strncmp(pathname, "/dev/ptmx", strlen("/dev/ptmx")))
-        return posix_openpt(flags);
-    if (!strncmp(pathname,SAVE_PATH,strlen(SAVE_PATH)))
-        return open_savefile(pathname, flags & O_WRONLY);
-    if (!strcmp(pathname, "/etc/nsd/nsd.conf")) {
-	if ((flags & 3) != O_RDONLY) {
-	    errno = -EPERM;
-	    return -1;
-	}
-	fd = alloc_fd(FTYPE_CONFFILE);
-	printk("open(%s) -> %d\n", pathname, fd);
-	files[fd].file.offset = 0;
-	return fd;
+    } else if (!strncmp(pathname, "/dev/ptmx", strlen("/dev/ptmx"))) {
+        fd = posix_openpt(flags);
+    } else if (!strncmp(pathname,SAVE_PATH,strlen(SAVE_PATH))) {
+        fd = open_savefile(pathname, flags & O_WRONLY);
+    } else if (!strcmp(pathname, "/etc/nsd/nsd.conf")) {
+	fd = open_compiled_file(CONFIGURATION, sizeof(CONFIGURATION) - 1, flags);
+    } else if (!strcmp(pathname, "/var/db/nsd/nsd.db")) {
+	fd = open_compiled_file(__nsd_database, sizeof(__nsd_database) - 1, flags);
+    } else if (!strcmp(pathname, "/var/run/nsd.pid")) {
+	errno = ENOENT;
+	fd = -1;
+    } else {
+	errno = EIO;
+	fd = -1;
     }
 
-    printk("open(%s, %d) -> -1\n", pathname, flags);
-    errno = EIO;
-    return -1;
+    printk("open(%s, %d) -> %d\n", pathname, flags, fd);
+    return fd;
 }
 
 int open64(const char *pathname, int flags, int mode)
@@ -289,22 +316,17 @@ int read(int fd, void *buf, size_t nbytes)
 	    }
 	    return ret * sizeof(union xenfb_in_event);
         }
-	case FTYPE_CONFFILE: {
+	case FTYPE_COMPILED_FILE: {
 	    int n;
-#define CONFIGURATION				\
-"server:\n"					\
-"\n"						\
-"zone:\n"					\
-"    name: \"example.com\"\n"			\
-"    zonefile: \"example.com.zone\"\n"
-	    if (files[fd].file.offset >= sizeof(CONFIGURATION) - 1)
+	    if (files[fd].compiled_file.offset >= files[fd].compiled_file.size)
 		    n = 0;
 	    else
-		    n = sizeof(CONFIGURATION) - 1 - files[fd].file.offset;
+		    n = files[fd].compiled_file.size - files[fd].compiled_file.offset;
 	    if (n >= nbytes)
 		    n = nbytes;
-	    memcpy(buf, CONFIGURATION + files[fd].file.offset, n);
-	    files[fd].file.offset += n;
+	    printf("Request %d on %d, get %d\n", nbytes, fd, n);
+	    memcpy(buf, files[fd].compiled_file.content + files[fd].compiled_file.offset, n);
+	    files[fd].compiled_file.offset += n;
 	    return n;
 	}
 	default:
@@ -347,8 +369,29 @@ int write(int fd, const void *buf, size_t nbytes)
 
 off_t lseek(int fd, off_t offset, int whence)
 {
-    errno = ESPIPE;
-    return (off_t) -1;
+    switch (files[fd].type) {
+	case FTYPE_COMPILED_FILE:
+	    switch (whence) {
+		case SEEK_SET:
+		    files[fd].compiled_file.offset = offset;
+		    break;
+		case SEEK_CUR:
+		    files[fd].compiled_file.offset += offset;
+		    break;
+		case SEEK_END:
+		    files[fd].compiled_file.offset = files[fd].compiled_file.size - offset;
+		    break;
+		default:
+		    errno = EINVAL;
+		    return (off_t)-1;
+	    }
+	    if (files[fd].compiled_file.offset > files[fd].compiled_file.size)
+		files[fd].compiled_file.offset = files[fd].compiled_file.size;
+	    return files[fd].compiled_file.offset;
+	default:
+	    errno = ESPIPE;
+	    return (off_t) -1;
+    }
 }
 
 int fsync(int fd) {
@@ -449,9 +492,9 @@ int fstat(int fd, struct stat *buf)
 	    buf->st_ctime = time(NULL);
 	    return 0;
 	}
-	case FTYPE_CONFFILE: {
+	case FTYPE_COMPILED_FILE: {
 	    buf->st_mode = S_IFREG | S_IRUSR;
-	    buf->st_size = sizeof(CONFIGURATION) - 1;
+	    buf->st_size = files[fd].compiled_file.size - 1;
 	    buf->st_blocks = 1;
 	    return 0;
 	}

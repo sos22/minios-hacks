@@ -147,7 +147,7 @@ enum fd_type {
     FTYPE_FB,
     FTYPE_MEM,
     FTYPE_SAVEFILE,
-	FTYPE_CONFFILE,
+	FTYPE_COMPILED_FILE,
 };
 
 #define MAX_EVTCHN_PORTS 16
@@ -164,6 +164,12 @@ extern struct file {
 	    int fd;
 	    off_t offset;
 	} file;
+	struct {
+		/* Compiled-in file */
+		off_t offset;
+		off_t size;
+		const unsigned char *content;
+	} compiled_file;
 	struct {
             /* To each event channel FD is associated a series of ports which
              * wakes select for this FD. */

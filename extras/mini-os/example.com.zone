@@ -1,0 +1,18 @@
+$ORIGIN example.com.
+$TTL 1h
+example.com. IN SOA ns.example.com. me@example.com. (
+				2012072001  ; Serial
+				3H          ; refresh after 3 hours
+				1H          ; retry after 1 hour
+				1W          ; expire after 1 week
+				1D)         ; minimum TTL of 1 day
+
+	; Name Server
+	IN	NS	ns.example.com.
+
+	; Mail Exchanger
+	IN	MX	50 mx.example.com.	; Your Mail Server
+
+example.com.				IN A		10.0.0.5
+www.example.com.			IN A		10.0.0.6
+test.example.com.			IN A		10.0.0.7

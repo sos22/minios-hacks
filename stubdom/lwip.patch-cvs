@@ -2396,3 +2396,41 @@ diff -u -p -r1.29 -r1.30
    return ERR_OK;
  }
 +#endif /* LWIP_HAVE_SLIPIF */
+diff -Naur -x '*.[oi]' lwip-x86_64/src/api/sockets.c lwip-working/src/api/sockets.c
+--- src/api/sockets.c       2012-07-20 18:48:41.000000000 +0100
++++ src/api/sockets.c      2012-07-20 13:28:45.000000000 +0100
+@@ -38,6 +38,8 @@
+  *
+  */
+ 
++struct timeval;
++
+ #include "lwip/opt.h"
+ 
+ #if LWIP_SOCKET /* don't build if not configured for use in lwipopts.h */
+diff -Naur -x '*.[oi]' lwip-x86_64/src/core/udp.c lwip-working/src/core/udp.c
+--- src/core/udp.c  2008-01-15 12:44:37.000000000 +0000
++++ src/core/udp.c 2012-07-20 18:43:32.000000000 +0100
+@@ -246,7 +246,7 @@
+ #endif /* LWIP_UDPLITE */
+     {
+ #if CHECKSUM_CHECK_UDP
+-      if (udphdr->chksum != 0) {
++      if (udphdr->chksum != 0 && 0) {
+         if (inet_chksum_pseudo(p, (struct ip_addr *)&(iphdr->src),
+                                (struct ip_addr *)&(iphdr->dest),
+                                IP_PROTO_UDP, p->tot_len) != 0) {
+diff -Naur -x '*.[oi]' lwip-x86_64/src/include/lwip/sockets.h lwip-working/src/include/lwip/sockets.h
+--- src/include/lwip/sockets.h      2012-07-20 18:48:41.000000000 +0100
++++ src/include/lwip/sockets.h     2012-07-20 13:31:09.000000000 +0100
+@@ -318,8 +318,9 @@
+     struct sockaddr *to, socklen_t tolen);
+ int lwip_socket(int domain, int type, int protocol);
+ int lwip_write(int s, const void *dataptr, int size);
++struct timeval;
+ int lwip_select(int maxfdp1, fd_set *readset, fd_set *writeset, fd_set *exceptset,
+-                struct timeval *timeout);
++               struct timeval *timeout);
+ int lwip_ioctl(int s, long cmd, void *argp);
+ 
+ #if LWIP_COMPAT_SOCKETS

@@ -2451,3 +2451,14 @@ diff -u -p -r1.29 -r1.30
  struct netbuf *   netconn_recv    (struct netconn *conn);
  err_t             netconn_sendto  (struct netconn *conn,
                                     struct netbuf *buf, struct ip_addr *addr, u16_t port);
+--- lwip-working/src/core/tcp_in.c	2012-07-20 12:58:49.000000000 +0100
++++ lwip-x86_64/src/core/tcp_in.c	2012-07-21 13:56:45.000000000 +0100
+@@ -130,7 +130,7 @@ tcp_input(struct pbuf *p, struct netif *
+     return;
+   }
+ 
+-#if CHECKSUM_CHECK_TCP
++#if 0
+   /* Verify TCP checksum. */
+   if (inet_chksum_pseudo(p, (struct ip_addr *)&(iphdr->src),
+       (struct ip_addr *)&(iphdr->dest),

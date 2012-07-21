@@ -1273,9 +1273,22 @@ int getdtablesize(void)
     return NOFILE;
 }
 
+int readlink(const char *path, char *buf, int bufsize)
+{
+    int res;
+    if (!strcmp(path, ".")) {
+	errno = EINVAL;
+	res = -1;
+    } else {
+	errno = ENOENT;
+	res = -1;
+    }
+    printf("readlink(%s, ..., %d) -> %d\n", path, bufsize, res);
+    return res;
+}
+
 /* Not supported by FS yet.  */
 unsupported_function_crash(link);
-unsupported_function(int, readlink, -1);
 unsupported_function_crash(umask);
 
 /* We could support that.  */

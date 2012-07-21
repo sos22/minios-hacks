@@ -2,7 +2,7 @@
 # The file contains the common make rules for building mini-os.
 #
 
-debug = y
+debug = n
 
 # Define some default flags.
 # NB. '-Wcast-qual' is nasty, so I omitted it.

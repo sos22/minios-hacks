@@ -359,10 +359,6 @@ initialize_listen_socket( )
 
     /* Allow reuse of local addresses. */
     on = 1;
-    if ( setsockopt(
-	     listen_fd, SOL_SOCKET, SO_REUSEADDR, (char*) &on,
-	     sizeof(on) ) < 0 )
-	syslog( LOG_CRIT, "setsockopt SO_REUSEADDR - %m" );
 
     memset(&sin, 0, sizeof(sin));
     sin.sin_family = AF_INET;

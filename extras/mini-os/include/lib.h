@@ -158,6 +158,7 @@ extern struct file {
 	struct {
             /* lwIP fd */
 	    int fd;
+		int nonblock;
 	} socket;
 	struct {
             /* FS import fd */

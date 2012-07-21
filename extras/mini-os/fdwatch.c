@@ -35,6 +35,9 @@
 #include <sys/resource.h>
 #include <syslog.h>
 #include <fcntl.h>
+#include <stdio.h>
+#include <errno.h>
+#include <sys/select.h>
 
 #ifndef MIN
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
@@ -617,7 +620,10 @@ poll_watch( long timeout_msecs )
 
     r = poll( pollfds, npoll_fds, (int) timeout_msecs );
     if ( r <= 0 )
+	{
+	printf("poll returned %d (%s)\n", r, strerror(errno));
 	return r;
+	}
 
     ridx = 0;
     for ( i = 0; i < npoll_fds; ++i )
@@ -629,6 +635,7 @@ poll_watch( long timeout_msecs )
 		break;
 	    }
 
+    printf("Poll succeeeds; %d\n", ridx);
     return ridx;	/* should be equal to r */
     }
 

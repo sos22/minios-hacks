@@ -580,15 +580,25 @@ int fcntl(int fd, int cmd, ...)
 	    if (files[fd].type == FTYPE_SOCKET && !(arg & ~O_NONBLOCK)) {
 		/* Only flag supported: non-blocking mode */
 		uint32_t nblock = !!(arg & O_NONBLOCK);
+		files[fd].socket.nonblock = nblock;
 		return lwip_ioctl(files[fd].socket.fd, FIONBIO, &nblock);
 	    }
-	    /* Fallthrough */
+	    break;
+	case F_GETFL:
+	    if (files[fd].type == FTYPE_SOCKET) {
+		if (files[fd].socket.nonblock)
+		    return O_NONBLOCK;
+		else
+		    return 0;
+	    }
+	    break;
 #endif
 	default:
-	    printk("fcntl(%d, %d, %lx/%lo)\n", fd, cmd, arg, arg);
-	    errno = ENOSYS;
-	    return -1;
+	    break;
     }
+    printk("fcntl(%d, %d, %lx/%lo)\n", fd, cmd, arg, arg);
+    errno = ENOSYS;
+    return -1;
 }
 
 /* We assume that only the main thread calls select(). */
@@ -928,6 +938,7 @@ int socket(int domain, int type, int protocol)
     res = alloc_fd(FTYPE_SOCKET);
     printk("socket -> %d\n", res);
     files[res].socket.fd = fd;
+    files[res].socket.nonblock = 0;
     return res;
 }
 
@@ -984,6 +995,7 @@ void vsyslog(int priority, const char *format, va_list ap)
 {
     printk("%s: ", syslog_ident);
     print(0, format, ap);
+    printk("\n");
 }
 
 void syslog(int priority, const char *format, ...)
@@ -1301,7 +1313,6 @@ unsupported_function(int, tcgetattr, 0);
 unsupported_function(int, grantpt, -1);
 unsupported_function(int, unlockpt, -1);
 unsupported_function(char *, ptsname, NULL);
-unsupported_function(int, poll, -1);
 
 /* net/if.h */
 unsupported_function_log(unsigned int, if_nametoindex, -1);

@@ -297,34 +297,6 @@ handle_usr2( int sig )
     }
 
 
-/* SIGALRM is used as a watchdog. */
-static void
-handle_alrm( int sig )
-    {
-    const int oerrno = errno;
-
-    /* If nothing has been happening */
-    if ( ! watchdog_flag )
-	{
-	/* Try changing dirs to someplace we can write. */
-	(void) chdir( "/tmp" );
-	/* Dump core. */
-	abort();
-	}
-    watchdog_flag = 0;
-
-#ifndef HAVE_SIGSET
-    /* Set up handler again. */
-    (void) signal( SIGALRM, handle_alrm );
-#endif /* ! HAVE_SIGSET */
-    /* Set up alarm again. */
-    (void) alarm( OCCASIONAL_TIME * 3 );
-
-    /* Restore previous errno. */
-    errno = oerrno;
-    }
-
-
 static void
 re_open_logfile( void )
     {
@@ -353,9 +325,6 @@ int
 main( int argc, char** argv )
     {
     char* cp;
-    struct passwd* pwd;
-    uid_t uid = 32767;
-    gid_t gid = 32767;
     char cwd[MAXPATHLEN+1];
     FILE* logfp;
     int num_ready;
@@ -387,22 +356,6 @@ main( int argc, char** argv )
     if ( throttlefile != (char*) 0 )
 	read_throttlefile( throttlefile );
 
-    /* If we're root and we're going to become another user, get the uid/gid
-    ** now.
-    */
-    if ( getuid() == 0 )
-	{
-	pwd = getpwnam( user );
-	if ( pwd == (struct passwd*) 0 )
-	    {
-	    syslog( LOG_CRIT, "unknown user - '%.80s'", user );
-	    (void) fprintf( stderr, "%s: unknown user - '%s'\n", argv0, user );
-	    exit( 1 );
-	    }
-	uid = pwd->pw_uid;
-	gid = pwd->pw_gid;
-	}
-
     /* Log file. */
     if ( logfile != (char*) 0 )
 	{
@@ -428,17 +381,6 @@ main( int argc, char** argv )
 		(void) fprintf( stderr, "%s: logfile is not an absolute path, you may not be able to re-open it\n", argv0 );
 		}
 	    (void) fcntl( fileno( logfp ), F_SETFD, 1 );
-	    if ( getuid() == 0 )
-		{
-		/* If we are root then we chown the log file to the user we'll
-		** be switching to.
-		*/
-		if ( fchown( fileno( logfp ), uid, gid ) < 0 )
-		    {
-		    syslog( LOG_WARNING, "fchown logfile - %m" );
-		    perror( "fchown logfile" );
-		    }
-		}
 	    }
 	}
     else
@@ -519,7 +461,6 @@ main( int argc, char** argv )
     (void) sigset( SIGHUP, handle_hup );
     (void) sigset( SIGUSR1, handle_usr1 );
     (void) sigset( SIGUSR2, handle_usr2 );
-    (void) sigset( SIGALRM, handle_alrm );
 #else /* HAVE_SIGSET */
     (void) signal( SIGTERM, handle_term );
     (void) signal( SIGINT, handle_term );
@@ -528,12 +469,10 @@ main( int argc, char** argv )
     (void) signal( SIGHUP, handle_hup );
     (void) signal( SIGUSR1, handle_usr1 );
     (void) signal( SIGUSR2, handle_usr2 );
-    (void) signal( SIGALRM, handle_alrm );
 #endif /* HAVE_SIGSET */
     got_hup = 0;
     got_usr1 = 0;
     watchdog_flag = 0;
-    (void) alarm( OCCASIONAL_TIME * 3 );
 
     /* Initialize the timer package. */
     tmr_init();
@@ -626,7 +565,7 @@ main( int argc, char** argv )
 	    {
 	    if ( errno == EINTR || errno == EAGAIN )
 		continue;       /* try again */
-	    syslog( LOG_ERR, "fdwatch - %m" );
+	    syslog( LOG_ERR, "fdwatch - %s", strerror(errno));
 	    exit( 1 );
 	    }
 	(void) gettimeofday( &tv, (struct timezone*) 0 );

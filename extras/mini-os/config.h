@@ -46,7 +46,6 @@
 #define HAVE_ATOLL 1
 #define HAVE_UNISTD_H 1
 #define HAVE_GETPAGESIZE 1
-#define HAVE_MMAP 1
 #define HAVE_SELECT 1
 #define HAVE_INT64T 1
 #define HAVE_SOCKLENT 1

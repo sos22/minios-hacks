@@ -53,6 +53,9 @@
 #include <lwip/sockets.h>
 #endif
 
+static const unsigned char INDEX_HTML[] =
+    "<html><head><title>Dummy index.html</title></head><body>This is index.html</body></html>";
+
 #define debug(fmt, ...) \
 
 #define print_unsupported(fmt, ...) \
@@ -196,7 +199,6 @@ int open_savefile(const char *path, int save)
     return(dev->fd);
 }
 
-#if 0
 static int open_compiled_file(const unsigned char *content, off_t size, int flags)
 {
     int fd;
@@ -211,7 +213,6 @@ static int open_compiled_file(const unsigned char *content, off_t size, int flag
     files[fd].compiled_file.content = content;
     return fd;
 }
-#endif
 
 int open(const char *pathname, int flags, ...)
 {
@@ -225,6 +226,8 @@ int open(const char *pathname, int flags, ...)
         fd = posix_openpt(flags);
     } else if (!strncmp(pathname,SAVE_PATH,strlen(SAVE_PATH))) {
         fd = open_savefile(pathname, flags & O_WRONLY);
+    } else if (!strcmp(pathname, "index.html")) {
+	fd = open_compiled_file(INDEX_HTML, sizeof(INDEX_HTML), flags);
     } else {
 	fd = -1;
 	errno = EIO;
@@ -478,6 +481,9 @@ int close(int fd)
             fini_console(files[fd].cons.dev);
             files[fd].type = FTYPE_NONE;
             return 0;
+	case FTYPE_COMPILED_FILE:
+            files[fd].type = FTYPE_NONE;
+	    return 0;
 	case FTYPE_NONE:
 	    break;
     }
@@ -505,6 +511,10 @@ int stat(const char *path, struct stat *buf)
     if (!strcmp(path, ".")) {
 	buf->st_mode = S_IFDIR | S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
 	res = 0;
+    } else if (!strcmp(path, "index.html")) {
+	int fd = open(path, O_RDONLY);
+	res = fstat(fd, buf);
+	close(fd);
     } else {
 	res = -1;
 	errno = EIO;
@@ -535,7 +545,7 @@ int fstat(int fd, struct stat *buf)
 	    return 0;
 	}
 	case FTYPE_COMPILED_FILE: {
- 	    buf->st_mode = S_IFREG | S_IRUSR;
+ 	    buf->st_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH;
 	    buf->st_size = files[fd].compiled_file.size - 1;
  	    buf->st_blocks = 1;
  	    return 0;
@@ -1286,7 +1296,7 @@ int getdtablesize(void)
 int readlink(const char *path, char *buf, int bufsize)
 {
     int res;
-    if (!strcmp(path, ".")) {
+    if (!strcmp(path, ".") || !strcmp(path, "index.html")) {
 	errno = EINVAL;
 	res = -1;
     } else {

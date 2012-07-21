@@ -170,7 +170,7 @@ typedef struct {
 ** Return (httpd_server*) 0 on error.
 */
 extern httpd_server* httpd_initialize(
-    char* hostname, httpd_sockaddr* sa4P, httpd_sockaddr* sa6P,
+    char* hostname,
     unsigned short port, char* cgi_pattern, int cgi_limit, char* charset,
     char* p3p, int max_age, char* cwd, int no_log, FILE* logfp,
     int no_symlink_check, int vhost, int global_passwd, char* url_pattern,

@@ -41,7 +41,13 @@
 #include <pthread.h>
 #include <assert.h>
 #include <stdlib.h>
+#define cabs() cabs(void)
+#define cabsf() cabsf(void)
 #include <math.h>
+#undef cabsf
+#undef cabs
+
+#include <posix/pthread.h>
 
 #ifdef HAVE_LWIP
 #include <lwip/sockets.h>
@@ -234,11 +240,19 @@ int open64(const char *pathname, int flags, int mode)
 
 int isatty(int fd)
 {
+    if (fd >= NOFILE || fd < 0) {
+	errno = EBADF;
+	return -1;
+    }
     return files[fd].type == FTYPE_CONSOLE;
 }
 
 int read(int fd, void *buf, size_t nbytes)
 {
+    if (fd >= NOFILE || fd < 0) {
+	errno = EBADF;
+	return -1;
+    }
     switch (files[fd].type) {
         case FTYPE_SAVEFILE:
 	case FTYPE_CONSOLE: {
@@ -309,6 +323,11 @@ int read(int fd, void *buf, size_t nbytes)
 
 int write(int fd, const void *buf, size_t nbytes)
 {
+    if (fd >= NOFILE || fd < 0) {
+	errno = EBADF;
+	return -1;
+    }
+
     switch (files[fd].type) {
         case FTYPE_SAVEFILE: {
                 int ret = 0, tot = nbytes;
@@ -337,8 +356,47 @@ int write(int fd, const void *buf, size_t nbytes)
     return -1;
 }
 
+struct iovec {
+    void *iov_base;
+    size_t iov_len;
+};
+
+ssize_t writev(int fd, const struct iovec *iov, int iovcnt)
+{
+    int x;
+    ssize_t acc;
+    int r;
+
+    if (fd >= NOFILE || fd < 0) {
+	errno = EBADF;
+	return -1;
+    }
+
+    acc = 0;
+    for (x = 0; x < iovcnt; x++) {
+	if (iov->iov_len != 0) {
+#ifdef HAVE_LWIP
+	    if (files[fd].type == FTYPE_SOCKET)
+		r = lwip_send(fd, iov[x].iov_base, iov[x].iov_len, x == iovcnt - 1 ? 0 : MSG_MORE);
+	    else
+#endif
+		r = write(fd, iov[x].iov_base, iov[x].iov_len);
+	    if (r <= 0)
+		break;
+	    acc += r;
+	}
+    }
+    if (acc == 0 && r != 0)
+	return -1;
+    return acc;
+}
+
 off_t lseek(int fd, off_t offset, int whence)
 {
+    if (fd >= NOFILE || fd < 0) {
+	errno = EBADF;
+	return -1;
+    }
     switch (files[fd].type) {
 	case FTYPE_COMPILED_FILE:
 	    switch (whence) {
@@ -372,6 +430,10 @@ int fsync(int fd) {
 int close(int fd)
 {
     printk("close(%d)\n", fd);
+    if (fd >= NOFILE || fd < 0) {
+	errno = EBADF;
+	return -1;
+    }
     switch (files[fd].type) {
         default:
 	    files[fd].type = FTYPE_NONE;

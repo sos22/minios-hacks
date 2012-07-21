@@ -121,7 +121,7 @@ typedef int socklen_t;
 /* Forwards. */
 static void check_options( void );
 static void free_httpd_server( httpd_server* hs );
-static int initialize_listen_socket( httpd_sockaddr* saP );
+static int initialize_listen_socket( void );
 static void add_response( httpd_conn* hc, char* str );
 static void send_mime( httpd_conn* hc, int status, char* title, char* encodings, char* extraheads, char* type, off_t length, time_t mod );
 static void send_response( httpd_conn* hc, int status, char* title, char* extraheads, char* form, char* arg );
@@ -130,12 +130,6 @@ static void defang( char* str, char* dfstr, int dfsize );
 #ifdef ERR_DIR
 static int send_err_file( httpd_conn* hc, int status, char* title, char* extraheads, char* filename );
 #endif /* ERR_DIR */
-#ifdef AUTH_FILE
-static void send_authenticate( httpd_conn* hc, char* realm );
-static int b64_decode( const char* str, unsigned char* space, int size );
-static int auth_check( httpd_conn* hc, char* dirname  );
-static int auth_check2( httpd_conn* hc, char* dirname  );
-#endif /* AUTH_FILE */
 static void send_dirredirect( httpd_conn* hc );
 static int hexit( char c );
 static void strdecode( char* to, char* from );
@@ -210,7 +204,7 @@ free_httpd_server( httpd_server* hs )
 
 httpd_server*
 httpd_initialize(
-    char* hostname, httpd_sockaddr* sa4P, httpd_sockaddr* sa6P,
+    char* hostname,
     unsigned short port, char* cgi_pattern, int cgi_limit, char* charset,
     char* p3p, int max_age, char* cwd, int no_log, FILE* logfp,
     int no_symlink_check, int vhost, int global_passwd, char* url_pattern,
@@ -323,14 +317,8 @@ httpd_initialize(
     ** like some other systems, it has magical v6 sockets that also listen for
     ** v4, but in Linux if you bind a v4 socket first then the v6 bind fails.
     */
-    if ( sa6P == (httpd_sockaddr*) 0 )
-	hs->listen6_fd = -1;
-    else
-	hs->listen6_fd = initialize_listen_socket( sa6P );
-    if ( sa4P == (httpd_sockaddr*) 0 )
-	hs->listen4_fd = -1;
-    else
-	hs->listen4_fd = initialize_listen_socket( sa4P );
+    hs->listen6_fd = -1;
+    hs->listen4_fd = initialize_listen_socket( );
     /* If we didn't get any valid sockets, fail. */
     if ( hs->listen4_fd == -1 && hs->listen6_fd == -1 )
 	{
@@ -347,31 +335,24 @@ httpd_initialize(
 	    (int) hs->port );
     else
 	syslog(
-	    LOG_NOTICE, "%.80s starting on %.80s, port %d", SERVER_SOFTWARE,
-	    httpd_ntoa( hs->listen4_fd != -1 ? sa4P : sa6P ),
+	    LOG_NOTICE, "%.80s starting, port %d", SERVER_SOFTWARE,
 	    (int) hs->port );
     return hs;
     }
 
 
 static int
-initialize_listen_socket( httpd_sockaddr* saP )
+initialize_listen_socket( )
     {
     int listen_fd;
     int on, flags;
-
-    /* Check sockaddr. */
-    if ( ! sockaddr_check( saP ) )
-	{
-	syslog( LOG_CRIT, "unknown sockaddr family on listen socket" );
-	return -1;
-	}
+    struct sockaddr_in sin;
 
     /* Create socket. */
-    listen_fd = socket( saP->sa.sa_family, SOCK_STREAM, 0 );
+    listen_fd = socket( AF_INET, SOCK_STREAM, 0 );
     if ( listen_fd < 0 )
 	{
-	syslog( LOG_CRIT, "socket %.80s - %m", httpd_ntoa( saP ) );
+	syslog( LOG_CRIT, "socket %m" );
 	return -1;
 	}
     (void) fcntl( listen_fd, F_SETFD, 1 );
@@ -383,11 +364,15 @@ initialize_listen_socket( httpd_sockaddr* saP )
 	     sizeof(on) ) < 0 )
 	syslog( LOG_CRIT, "setsockopt SO_REUSEADDR - %m" );
 
+    memset(&sin, 0, sizeof(sin));
+    sin.sin_family = AF_INET;
+    sin.sin_port = htons(80);
+
     /* Bind to it. */
-    if ( bind( listen_fd, &saP->sa, sockaddr_len( saP ) ) < 0 )
+    if ( bind( listen_fd, (struct sockaddr *)&sin, sizeof(sin) ) < 0 )
 	{
 	syslog(
-	    LOG_CRIT, "bind %.80s - %m", httpd_ntoa( saP ) );
+	    LOG_CRIT, "bind - %m" );
 	(void) close( listen_fd );
 	return -1;
 	}
@@ -493,12 +478,6 @@ static char* err304title = "Not Modified";
 char* httpd_err400title = "Bad Request";
 char* httpd_err400form =
     "Your request has bad syntax or is inherently impossible to satisfy.\n";
-
-#ifdef AUTH_FILE
-static char* err401title = "Unauthorized";
-static char* err401form =
-    "Authorization required for the URL '%.80s'.\n";
-#endif /* AUTH_FILE */
 
 static char* err403title = "Forbidden";
 #ifndef EXPLICIT_ERROR_PAGES
@@ -858,282 +837,6 @@ send_err_file( httpd_conn* hc, int status, char* title, char* extraheads, char* 
     }
 #endif /* ERR_DIR */
 
-
-#ifdef AUTH_FILE
-
-static void
-send_authenticate( httpd_conn* hc, char* realm )
-    {
-    static char* header;
-    static size_t maxheader = 0;
-    static char headstr[] = "WWW-Authenticate: Basic realm=\"";
-
-    httpd_realloc_str(
-	&header, &maxheader, sizeof(headstr) + strlen( realm ) + 3 );
-    (void) my_snprintf( header, maxheader, "%s%s\"\015\012", headstr, realm );
-    httpd_send_err( hc, 401, err401title, header, err401form, hc->encodedurl );
-    /* If the request was a POST then there might still be data to be read,
-    ** so we need to do a lingering close.
-    */
-    if ( hc->method == METHOD_POST )
-	hc->should_linger = 1;
-    }
-
-
-/* Base-64 decoding.  This represents binary data as printable ASCII
-** characters.  Three 8-bit binary bytes are turned into four 6-bit
-** values, like so:
-**
-**   [11111111]  [22222222]  [33333333]
-**
-**   [111111] [112222] [222233] [333333]
-**
-** Then the 6-bit values are represented using the characters "A-Za-z0-9+/".
-*/
-
-static int b64_decode_table[256] = {
-    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,  /* 00-0F */
-    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,  /* 10-1F */
-    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,-1,63,  /* 20-2F */
-    52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-1,-1,-1,  /* 30-3F */
-    -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,  /* 40-4F */
-    15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,-1,  /* 50-5F */
-    -1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,  /* 60-6F */
-    41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1,  /* 70-7F */
-    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,  /* 80-8F */
-    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,  /* 90-9F */
-    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,  /* A0-AF */
-    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,  /* B0-BF */
-    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,  /* C0-CF */
-    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,  /* D0-DF */
-    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,  /* E0-EF */
-    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1   /* F0-FF */
-    };
-
-/* Do base-64 decoding on a string.  Ignore any non-base64 bytes.
-** Return the actual number of bytes generated.  The decoded size will
-** be at most 3/4 the size of the encoded, and may be smaller if there
-** are padding characters (blanks, newlines).
-*/
-static int
-b64_decode( const char* str, unsigned char* space, int size )
-    {
-    const char* cp;
-    int space_idx, phase;
-    int d, prev_d = 0;
-    unsigned char c;
-
-    space_idx = 0;
-    phase = 0;
-    for ( cp = str; *cp != '\0'; ++cp )
-	{
-	d = b64_decode_table[(int) *cp];
-	if ( d != -1 )
-	    {
-	    switch ( phase )
-		{
-		case 0:
-		++phase;
-		break;
-		case 1:
-		c = ( ( prev_d << 2 ) | ( ( d & 0x30 ) >> 4 ) );
-		if ( space_idx < size )
-		    space[space_idx++] = c;
-		++phase;
-		break;
-		case 2:
-		c = ( ( ( prev_d & 0xf ) << 4 ) | ( ( d & 0x3c ) >> 2 ) );
-		if ( space_idx < size )
-		    space[space_idx++] = c;
-		++phase;
-		break;
-		case 3:
-		c = ( ( ( prev_d & 0x03 ) << 6 ) | d );
-		if ( space_idx < size )
-		    space[space_idx++] = c;
-		phase = 0;
-		break;
-		}
-	    prev_d = d;
-	    }
-	}
-    return space_idx;
-    }
-
-
-/* Returns -1 == unauthorized, 0 == no auth file, 1 = authorized. */
-static int
-auth_check( httpd_conn* hc, char* dirname  )
-    {
-    if ( hc->hs->global_passwd )
-	{
-	char* topdir;
-	if ( hc->hs->vhost && hc->hostdir[0] != '\0' )
-	    topdir = hc->hostdir;
-	else
-	    topdir = ".";
-	switch ( auth_check2( hc, topdir ) )
-	    {
-	    case -1:
-	    return -1;
-	    case 1:
-	    return 1;
-	    }
-	}
-    return auth_check2( hc, dirname );
-    }
-
-
-/* Returns -1 == unauthorized, 0 == no auth file, 1 = authorized. */
-static int
-auth_check2( httpd_conn* hc, char* dirname  )
-    {
-    static char* authpath;
-    static size_t maxauthpath = 0;
-    struct stat sb;
-    char authinfo[500];
-    char* authpass;
-    char* colon;
-    int l;
-    FILE* fp;
-    char line[500];
-    char* cryp;
-    static char* prevauthpath;
-    static size_t maxprevauthpath = 0;
-    static time_t prevmtime;
-    static char* prevuser;
-    static size_t maxprevuser = 0;
-    static char* prevcryp;
-    static size_t maxprevcryp = 0;
-
-    /* Construct auth filename. */
-    httpd_realloc_str(
-	&authpath, &maxauthpath, strlen( dirname ) + 1 + sizeof(AUTH_FILE) );
-    (void) my_snprintf( authpath, maxauthpath, "%s/%s", dirname, AUTH_FILE );
-
-    /* Does this directory have an auth file? */
-    if ( stat( authpath, &sb ) < 0 )
-	/* Nope, let the request go through. */
-	return 0;
-
-    /* Does this request contain basic authorization info? */
-    if ( hc->authorization[0] == '\0' ||
-	 strncmp( hc->authorization, "Basic ", 6 ) != 0 )
-	{
-	/* Nope, return a 401 Unauthorized. */
-	send_authenticate( hc, dirname );
-	return -1;
-	}
-
-    /* Decode it. */
-    l = b64_decode(
-	&(hc->authorization[6]), (unsigned char*) authinfo,
-	sizeof(authinfo) - 1 );
-    authinfo[l] = '\0';
-    /* Split into user and password. */
-    authpass = strchr( authinfo, ':' );
-    if ( authpass == (char*) 0 )
-	{
-	/* No colon?  Bogus auth info. */
-	send_authenticate( hc, dirname );
-	return -1;
-	}
-    *authpass++ = '\0';
-    /* If there are more fields, cut them off. */
-    colon = strchr( authpass, ':' );
-    if ( colon != (char*) 0 )
-	*colon = '\0';
-
-    /* See if we have a cached entry and can use it. */
-    if ( maxprevauthpath != 0 &&
-	 strcmp( authpath, prevauthpath ) == 0 &&
-	 sb.st_mtime == prevmtime &&
-	 strcmp( authinfo, prevuser ) == 0 )
-	{
-	/* Yes.  Check against the cached encrypted password. */
-	if ( strcmp( crypt( authpass, prevcryp ), prevcryp ) == 0 )
-	    {
-	    /* Ok! */
-	    httpd_realloc_str(
-		&hc->remoteuser, &hc->maxremoteuser, strlen( authinfo ) );
-	    (void) strcpy( hc->remoteuser, authinfo );
-	    return 1;
-	    }
-	else
-	    {
-	    /* No. */
-	    send_authenticate( hc, dirname );
-	    return -1;
-	    }
-	}
-
-    /* Open the password file. */
-    fp = fopen( authpath, "r" );
-    if ( fp == (FILE*) 0 )
-	{
-	/* The file exists but we can't open it?  Disallow access. */
-	syslog(
-	    LOG_ERR, "%.80s auth file %.80s could not be opened - %m",
-	    httpd_ntoa( &hc->client_addr ), authpath );
-	httpd_send_err(
-	    hc, 403, err403title, "",
-	    ERROR_FORM( err403form, "The requested URL '%.80s' is protected by an authentication file, but the authentication file cannot be opened.\n" ),
-	    hc->encodedurl );
-	return -1;
-	}
-
-    /* Read it. */
-    while ( fgets( line, sizeof(line), fp ) != (char*) 0 )
-	{
-	/* Nuke newline. */
-	l = strlen( line );
-	if ( line[l - 1] == '\n' )
-	    line[l - 1] = '\0';
-	/* Split into user and encrypted password. */
-	cryp = strchr( line, ':' );
-	if ( cryp == (char*) 0 )
-	    continue;
-	*cryp++ = '\0';
-	/* Is this the right user? */
-	if ( strcmp( line, authinfo ) == 0 )
-	    {
-	    /* Yes. */
-	    (void) fclose( fp );
-	    /* So is the password right? */
-	    if ( strcmp( crypt( authpass, cryp ), cryp ) == 0 )
-		{
-		/* Ok! */
-		httpd_realloc_str(
-		    &hc->remoteuser, &hc->maxremoteuser, strlen( line ) );
-		(void) strcpy( hc->remoteuser, line );
-		/* And cache this user's info for next time. */
-		httpd_realloc_str(
-		    &prevauthpath, &maxprevauthpath, strlen( authpath ) );
-		(void) strcpy( prevauthpath, authpath );
-		prevmtime = sb.st_mtime;
-		httpd_realloc_str(
-		    &prevuser, &maxprevuser, strlen( authinfo ) );
-		(void) strcpy( prevuser, authinfo );
-		httpd_realloc_str( &prevcryp, &maxprevcryp, strlen( cryp ) );
-		(void) strcpy( prevcryp, cryp );
-		return 1;
-		}
-	    else
-		{
-		/* No. */
-		send_authenticate( hc, dirname );
-		return -1;
-		}
-	    }
-	}
-
-    /* Didn't find that user.  Access denied. */
-    (void) fclose( fp );
-    send_authenticate( hc, dirname );
-    return -1;
-    }
-
-#endif /* AUTH_FILE */
 
 
 static void
@@ -2605,10 +2308,6 @@ really_start_request( httpd_conn* hc, struct timeval* nowP )
     static size_t maxindexname = 0;
     static const char* index_names[] = { INDEX_NAMES };
     int i;
-#ifdef AUTH_FILE
-    static char* dirname;
-    static size_t maxdirname = 0;
-#endif /* AUTH_FILE */
     size_t expnlen, indxlen;
     char* cp;
     char* pi;
@@ -2725,50 +2424,6 @@ really_start_request( httpd_conn* hc, struct timeval* nowP )
 	    return -1;
 	    }
 	}
-
-#ifdef AUTH_FILE
-    /* Check authorization for this directory. */
-    httpd_realloc_str( &dirname, &maxdirname, expnlen );
-    (void) strcpy( dirname, hc->expnfilename );
-    cp = strrchr( dirname, '/' );
-    if ( cp == (char*) 0 )
-	(void) strcpy( dirname, "." );
-    else
-	*cp = '\0';
-    if ( auth_check( hc, dirname ) == -1 )
-	return -1;
-
-    /* Check if the filename is the AUTH_FILE itself - that's verboten. */
-    if ( expnlen == sizeof(AUTH_FILE) - 1 )
-	{
-	if ( strcmp( hc->expnfilename, AUTH_FILE ) == 0 )
-	    {
-	    syslog(
-		LOG_NOTICE,
-		"%.80s URL \"%.80s\" tried to retrieve an auth file",
-		httpd_ntoa( &hc->client_addr ), hc->encodedurl );
-	    httpd_send_err(
-		hc, 403, err403title, "",
-		ERROR_FORM( err403form, "The requested URL '%.80s' is an authorization file, retrieving it is not permitted.\n" ),
-		hc->encodedurl );
-	    return -1;
-	    }
-	}
-    else if ( expnlen >= sizeof(AUTH_FILE) &&
-	      strcmp( &(hc->expnfilename[expnlen - sizeof(AUTH_FILE) + 1]), AUTH_FILE ) == 0 &&
-	      hc->expnfilename[expnlen - sizeof(AUTH_FILE)] == '/' )
-	{
-	syslog(
-	    LOG_NOTICE,
-	    "%.80s URL \"%.80s\" tried to retrieve an auth file",
-	    httpd_ntoa( &hc->client_addr ), hc->encodedurl );
-	httpd_send_err(
-	    hc, 403, err403title, "",
-	    ERROR_FORM( err403form, "The requested URL '%.80s' is an authorization file, retrieving it is not permitted.\n" ),
-	    hc->encodedurl );
-	return -1;
-	}
-#endif /* AUTH_FILE */
 
     /* Referer check. */
     if ( ! check_referer( hc ) )

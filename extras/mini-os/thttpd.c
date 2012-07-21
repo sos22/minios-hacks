@@ -34,7 +34,6 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
-#include <sys/uio.h>
 
 #include <errno.h>
 #ifdef HAVE_FCNTL_H
@@ -147,7 +146,6 @@ static void read_config( char* filename );
 static void value_required( char* name, char* value );
 static void no_value_required( char* name, char* value );
 static char* e_strdup( char* oldstr );
-static void lookup_hostname( httpd_sockaddr* sa4P, size_t sa4_len, int* gotv4P, httpd_sockaddr* sa6P, size_t sa6_len, int* gotv6P );
 static void read_throttlefile( char* throttlefile );
 static void shut_down( void );
 static int handle_newconnect( struct timeval* tvP, int listen_fd );
@@ -364,9 +362,6 @@ main( int argc, char** argv )
     int cnum;
     connecttab* c;
     httpd_conn* hc;
-    httpd_sockaddr sa4;
-    httpd_sockaddr sa6;
-    int gotv4, gotv6;
     struct timeval tv;
 
     argv0 = argv[0];
@@ -384,14 +379,6 @@ main( int argc, char** argv )
     /* Read zone info now, in case we chroot(). */
     tzset();
 
-    /* Look up hostname now, in case we chroot(). */
-    lookup_hostname( &sa4, sizeof(sa4), &gotv4, &sa6, sizeof(sa6), &gotv6 );
-    if ( ! ( gotv4 || gotv6 ) )
-	{
-	syslog( LOG_ERR, "can't find any valid address" );
-	(void) fprintf( stderr, "%s: can't find any valid address\n", argv0 );
-	exit( 1 );
-	}
 
     /* Throttle file. */
     numthrottles = 0;
@@ -488,49 +475,6 @@ main( int argc, char** argv )
     if ( cwd[strlen( cwd ) - 1] != '/' )
 	(void) strcat( cwd, "/" );
 
-    if ( ! debug )
-	{
-	/* We're not going to use stdin stdout or stderr from here on, so close
-	** them to save file descriptors.
-	*/
-	(void) fclose( stdin );
-	if ( logfp != stdout )
-	    (void) fclose( stdout );
-	(void) fclose( stderr );
-
-	/* Daemonize - make ourselves a subprocess. */
-#ifdef HAVE_DAEMON
-	if ( daemon( 1, 1 ) < 0 )
-	    {
-	    syslog( LOG_CRIT, "daemon - %m" );
-	    exit( 1 );
-	    }
-#else /* HAVE_DAEMON */
-	switch ( fork() )
-	    {
-	    case 0:
-	    break;
-	    case -1:
-	    syslog( LOG_CRIT, "fork - %m" );
-	    exit( 1 );
-	    default:
-	    exit( 0 );
-	    }
-#ifdef HAVE_SETSID
-        (void) setsid();
-#endif /* HAVE_SETSID */
-#endif /* HAVE_DAEMON */
-	}
-    else
-	{
-	/* Even if we don't daemonize, we still want to disown our parent
-	** process.
-	*/
-#ifdef HAVE_SETSID
-        (void) setsid();
-#endif /* HAVE_SETSID */
-	}
-
     if ( pidfile != (char*) 0 )
 	{
 	/* Write the PID file. */
@@ -554,46 +498,6 @@ main( int argc, char** argv )
 	exit( 1 );
 	}
     max_connects -= SPARE_FDS;
-
-    /* Chroot if requested. */
-    if ( do_chroot )
-	{
-	if ( chroot( cwd ) < 0 )
-	    {
-	    syslog( LOG_CRIT, "chroot - %m" );
-	    perror( "chroot" );
-	    exit( 1 );
-	    }
-	/* If we're logging and the logfile's pathname begins with the
-	** chroot tree's pathname, then elide the chroot pathname so
-	** that the logfile pathname still works from inside the chroot
-	** tree.
-	*/
-	if ( logfile != (char*) 0 && strcmp( logfile, "-" ) != 0 )
-	    {
-	    if ( strncmp( logfile, cwd, strlen( cwd ) ) == 0 )
-		{
-		(void) strcpy( logfile, &logfile[strlen( cwd ) - 1] );
-		/* (We already guaranteed that cwd ends with a slash, so leaving
-		** that slash in logfile makes it an absolute pathname within
-		** the chroot tree.)
-		*/
-		}
-	    else
-		{
-		syslog( LOG_WARNING, "logfile is not within the chroot tree, you will not be able to re-open it" );
-		(void) fprintf( stderr, "%s: logfile is not within the chroot tree, you will not be able to re-open it\n", argv0 );
-		}
-	    }
-	(void) strcpy( cwd, "/" );
-	/* Always chdir to / after a chroot. */
-	if ( chdir( cwd ) < 0 )
-	    {
-	    syslog( LOG_CRIT, "chroot chdir - %m" );
-	    perror( "chroot chdir" );
-	    exit( 1 );
-	    }
-	}
 
     /* Switch directories again if requested. */
     if ( data_dir != (char*) 0 )
@@ -639,7 +543,6 @@ main( int argc, char** argv )
     */
     hs = httpd_initialize(
 	hostname,
-	gotv4 ? &sa4 : (httpd_sockaddr*) 0, gotv6 ? &sa6 : (httpd_sockaddr*) 0,
 	port, cgi_pattern, cgi_limit, charset, p3p, max_age, cwd, no_log, logfp,
 	no_symlink_check, do_vhost, do_global_passwd, url_pattern,
 	local_pattern, no_empty_referers );
@@ -679,41 +582,6 @@ main( int argc, char** argv )
     stats_connections = 0;
     stats_bytes = 0;
     stats_simultaneous = 0;
-
-    /* If we're root, try to become someone else. */
-    if ( getuid() == 0 )
-	{
-	/* Set aux groups to null. */
-	if ( setgroups( 0, (const gid_t*) 0 ) < 0 )
-	    {
-	    syslog( LOG_CRIT, "setgroups - %m" );
-	    exit( 1 );
-	    }
-	/* Set primary group. */
-	if ( setgid( gid ) < 0 )
-	    {
-	    syslog( LOG_CRIT, "setgid - %m" );
-	    exit( 1 );
-	    }
-	/* Try setting aux groups correctly - not critical if this fails. */
-	if ( initgroups( user, gid ) < 0 )
-	    syslog( LOG_WARNING, "initgroups - %m" );
-#ifdef HAVE_SETLOGIN
-	/* Set login name. */
-        (void) setlogin( user );
-#endif /* HAVE_SETLOGIN */
-	/* Set uid. */
-	if ( setuid( uid ) < 0 )
-	    {
-	    syslog( LOG_CRIT, "setuid - %m" );
-	    exit( 1 );
-	    }
-	/* Check for unnecessary security exposure. */
-	if ( ! do_chroot )
-	    syslog(
-		LOG_WARNING,
-		"started as root without requesting chroot(), warning only" );
-	}
 
     /* Initialize our connections table. */
     connects = NEW( connecttab, max_connects );
@@ -1231,141 +1099,6 @@ e_strdup( char* oldstr )
     return newstr;
     }
 
-
-static void
-lookup_hostname( httpd_sockaddr* sa4P, size_t sa4_len, int* gotv4P, httpd_sockaddr* sa6P, size_t sa6_len, int* gotv6P )
-    {
-#ifdef USE_IPV6
-
-    struct addrinfo hints;
-    char portstr[10];
-    int gaierr;
-    struct addrinfo* ai;
-    struct addrinfo* ai2;
-    struct addrinfo* aiv6;
-    struct addrinfo* aiv4;
-
-    (void) memset( &hints, 0, sizeof(hints) );
-    hints.ai_family = PF_UNSPEC;
-    hints.ai_flags = AI_PASSIVE;
-    hints.ai_socktype = SOCK_STREAM;
-    (void) snprintf( portstr, sizeof(portstr), "%d", (int) port );
-    if ( (gaierr = getaddrinfo( hostname, portstr, &hints, &ai )) != 0 )
-	{
-	syslog(
-	    LOG_CRIT, "getaddrinfo %.80s - %.80s",
-	    hostname, gai_strerror( gaierr ) );
-	(void) fprintf(
-	    stderr, "%s: getaddrinfo %s - %s\n",
-	    argv0, hostname, gai_strerror( gaierr ) );
-	exit( 1 );
-	}
-
-    /* Find the first IPv6 and IPv4 entries. */
-    aiv6 = (struct addrinfo*) 0;
-    aiv4 = (struct addrinfo*) 0;
-    for ( ai2 = ai; ai2 != (struct addrinfo*) 0; ai2 = ai2->ai_next )
-	{
-	switch ( ai2->ai_family )
-	    {
-	    case AF_INET6:
-	    if ( aiv6 == (struct addrinfo*) 0 )
-		aiv6 = ai2;
-	    break;
-	    case AF_INET:
-	    if ( aiv4 == (struct addrinfo*) 0 )
-		aiv4 = ai2;
-	    break;
-	    }
-	}
-
-    if ( aiv6 == (struct addrinfo*) 0 )
-	*gotv6P = 0;
-    else
-	{
-	if ( sa6_len < aiv6->ai_addrlen )
-	    {
-	    syslog(
-		LOG_CRIT, "%.80s - sockaddr too small (%lu < %lu)",
-		hostname, (unsigned long) sa6_len,
-		(unsigned long) aiv6->ai_addrlen );
-	    exit( 1 );
-	    }
-	(void) memset( sa6P, 0, sa6_len );
-	(void) memmove( sa6P, aiv6->ai_addr, aiv6->ai_addrlen );
-	*gotv6P = 1;
-	}
-
-    if ( aiv4 == (struct addrinfo*) 0 )
-	*gotv4P = 0;
-    else
-	{
-	if ( sa4_len < aiv4->ai_addrlen )
-	    {
-	    syslog(
-		LOG_CRIT, "%.80s - sockaddr too small (%lu < %lu)",
-		hostname, (unsigned long) sa4_len,
-		(unsigned long) aiv4->ai_addrlen );
-	    exit( 1 );
-	    }
-	(void) memset( sa4P, 0, sa4_len );
-	(void) memmove( sa4P, aiv4->ai_addr, aiv4->ai_addrlen );
-	*gotv4P = 1;
-	}
-
-    freeaddrinfo( ai );
-
-#else /* USE_IPV6 */
-
-    struct hostent* he;
-
-    *gotv6P = 0;
-
-    (void) memset( sa4P, 0, sa4_len );
-    sa4P->sa.sa_family = AF_INET;
-    if ( hostname == (char*) 0 )
-	sa4P->sa_in.sin_addr.s_addr = htonl( INADDR_ANY );
-    else
-	{
-	sa4P->sa_in.sin_addr.s_addr = inet_addr( hostname );
-	if ( (int) sa4P->sa_in.sin_addr.s_addr == -1 )
-	    {
-	    he = gethostbyname( hostname );
-	    if ( he == (struct hostent*) 0 )
-		{
-#ifdef HAVE_HSTRERROR
-		syslog(
-		    LOG_CRIT, "gethostbyname %.80s - %.80s",
-		    hostname, hstrerror( h_errno ) );
-		(void) fprintf(
-		    stderr, "%s: gethostbyname %s - %s\n",
-		    argv0, hostname, hstrerror( h_errno ) );
-#else /* HAVE_HSTRERROR */
-		syslog( LOG_CRIT, "gethostbyname %.80s failed", hostname );
-		(void) fprintf(
-		    stderr, "%s: gethostbyname %s failed\n", argv0, hostname );
-#endif /* HAVE_HSTRERROR */
-		exit( 1 );
-		}
-	    if ( he->h_addrtype != AF_INET )
-		{
-		syslog( LOG_CRIT, "%.80s - non-IP network address", hostname );
-		(void) fprintf(
-		    stderr, "%s: %s - non-IP network address\n",
-		    argv0, hostname );
-		exit( 1 );
-		}
-	    (void) memmove(
-		&sa4P->sa_in.sin_addr.s_addr, he->h_addr, he->h_length );
-	    }
-	}
-    sa4P->sa_in.sin_port = htons( port );
-    *gotv4P = 1;
-
-#endif /* USE_IPV6 */
-    }
-
-
 static void
 read_throttlefile( char* throttlefile )
     {
@@ -1703,6 +1436,12 @@ handle_read( connecttab* c, struct timeval* tvP )
     fdwatch_add_fd( hc->conn_fd, c, FDW_WRITE );
     }
 
+
+struct iovec {
+    void   *iov_base;
+    size_t  iov_len;
+};
+ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
 
 static void
 handle_send( connecttab* c, struct timeval* tvP )

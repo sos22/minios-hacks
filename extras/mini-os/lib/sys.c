@@ -42,7 +42,11 @@
 #include <assert.h>
 //#include <dirent.h>
 #include <stdlib.h>
+#define cabs() cabs(void)
+#define cabsf() cabsf(void)
 #include <math.h>
+#undef cabsf
+#undef cabs
 
 #include <posix/pthread.h>
 

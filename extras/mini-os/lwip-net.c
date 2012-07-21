@@ -339,7 +339,7 @@ static void tcpip_bringup_finished(void *p)
  * which calls back to tcpip_bringup_finished(), which 
  * lets us know it's OK to continue.
  */
-void start_networking(void)
+void start_networking(char *gateway)
 {
   struct netif *netif;
   struct ip_addr ipaddr = { htonl(IF_IPADDR) };
@@ -350,7 +350,7 @@ void start_networking(void)
   tprintk("Waiting for network.\n");
 
   dev = init_netfront(NULL, NULL, rawmac, &ip);
-  
+
   if (ip) {
     ipaddr.addr = inet_addr(ip);
     if (IN_CLASSA(ntohl(ipaddr.addr)))
@@ -362,6 +362,11 @@ void start_networking(void)
     else
       tprintk("Strange IP %s, leaving netmask to 0.\n", ip);
   }
+  if (gateway) {
+    tprintk("Gateway ``%s''.\n", gateway);
+    gw.addr = inet_addr(gateway);
+  }
+
   tprintk("IP %x netmask %x gateway %x.\n",
           ntohl(ipaddr.addr), ntohl(netmask.addr), ntohl(gw.addr));
   

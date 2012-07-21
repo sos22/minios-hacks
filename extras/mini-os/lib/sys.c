@@ -499,8 +499,18 @@ static void init_stat(struct stat *buf)
 
 int stat(const char *path, struct stat *buf)
 {
-    errno = EIO;
-    return -1;
+    int res;
+
+    init_stat(buf);
+    if (!strcmp(path, ".")) {
+	buf->st_mode = S_IFDIR | S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
+	res = 0;
+    } else {
+	res = -1;
+	errno = EIO;
+    }
+    printf("stat(%s, ...) -> %d\n", path, res);
+    return res;
 }
 
 int fstat(int fd, struct stat *buf)

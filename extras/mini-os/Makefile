@@ -80,10 +80,8 @@ OBJS := $(filter-out $(OBJ_DIR)/lwip%.o $(LWO), $(OBJS))
 
 ifeq ($(libc),y)
 APP_LDLIBS += -L$(XEN_ROOT)/stubdom/libxc-$(XEN_TARGET_ARCH) -whole-archive -lxenguest -lxenctrl -no-whole-archive
-APP_LDLIBS += -lpci
-APP_LDLIBS += -lz
-APP_LDLIBS += -lm
-LDLIBS += -lc
+LDLIBS += -L$(XEN_ROOT)/stubdom/cross-root-x86_64/x86_64-xen-elf/lib -lc -L $(XEN_ROOT)/stubdom/libxc-x86_64 -lxenctrl
+CFLAGS += -I$(XEN_ROOT)/stubdom/cross-root-x86_64/x86_64-xen-elf/include
 endif
 
 ifneq ($(APP_OBJS)-$(lwip),-y)

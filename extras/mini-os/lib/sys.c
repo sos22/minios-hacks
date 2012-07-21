@@ -40,7 +40,6 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <assert.h>
-#include <dirent.h>
 #include <stdlib.h>
 #include <math.h>
 
@@ -174,7 +173,6 @@ int posix_openpt(int flags)
     dev->fd = alloc_fd(FTYPE_CONSOLE);
     files[dev->fd].cons.dev = dev;
 
-    printk("fd(%d) = posix_openpt\n", dev->fd);
     return(dev->fd);
 }
 
@@ -189,9 +187,25 @@ int open_savefile(const char *path, int save)
     dev->fd = alloc_fd(FTYPE_SAVEFILE);
     files[dev->fd].cons.dev = dev;
 
-    printk("fd(%d) = open_savefile\n", dev->fd);
     return(dev->fd);
 }
+
+#if 0
+static int open_compiled_file(const unsigned char *content, off_t size, int flags)
+{
+    int fd;
+
+    if (flags != 0) {
+	errno = EPERM;
+	return -1;
+    }
+    fd = alloc_fd(FTYPE_COMPILED_FILE);
+    files[fd].compiled_file.offset = 0;
+    files[fd].compiled_file.size = size;
+    files[fd].compiled_file.content = content;
+    return fd;
+}
+#endif
 
 int open(const char *pathname, int flags, ...)
 {
@@ -199,20 +213,23 @@ int open(const char *pathname, int flags, ...)
     /* Ugly, but fine.  */
     if (!strncmp(pathname,LOG_PATH,strlen(LOG_PATH))) {
 	fd = alloc_fd(FTYPE_CONSOLE);
-        printk("open(%s) -> %d\n", pathname, fd);
-        return fd;
-    }
-    if (!strncmp(pathname, "/dev/mem", strlen("/dev/mem"))) {
+    } else if (!strncmp(pathname, "/dev/mem", strlen("/dev/mem"))) {
         fd = alloc_fd(FTYPE_MEM);
-        printk("open(/dev/mem) -> %d\n", fd);
-        return fd;
+    } else if (!strncmp(pathname, "/dev/ptmx", strlen("/dev/ptmx"))) {
+        fd = posix_openpt(flags);
+    } else if (!strncmp(pathname,SAVE_PATH,strlen(SAVE_PATH))) {
+        fd = open_savefile(pathname, flags & O_WRONLY);
+    } else {
+	fd = -1;
+	errno = EIO;
     }
-    if (!strncmp(pathname, "/dev/ptmx", strlen("/dev/ptmx")))
-        return posix_openpt(flags);
-    if (!strncmp(pathname,SAVE_PATH,strlen(SAVE_PATH)))
-        return open_savefile(pathname, flags & O_WRONLY);
-    errno = EIO;
-    return -1;
+    printk("open(%s, %d) -> %d\n", pathname, flags, fd);
+    return fd;
+}
+
+int open64(const char *pathname, int flags, int mode)
+{
+    return open(pathname, flags, mode);
 }
 
 int isatty(int fd)
@@ -270,6 +287,18 @@ int read(int fd, void *buf, size_t nbytes)
 	    }
 	    return ret * sizeof(union xenfb_in_event);
         }
+	case FTYPE_COMPILED_FILE: {
+ 	    int n;
+	    if (files[fd].compiled_file.offset >= files[fd].compiled_file.size)
+		n = 0;
+ 	    else
+		n = files[fd].compiled_file.size - files[fd].compiled_file.offset;
+ 	    if (n >= nbytes)
+		n = nbytes;
+	    memcpy(buf, files[fd].compiled_file.content + files[fd].compiled_file.offset, n);
+	    files[fd].compiled_file.offset += n;
+ 	    return n;
+	}
 	default:
 	    break;
     }
@@ -310,8 +339,29 @@ int write(int fd, const void *buf, size_t nbytes)
 
 off_t lseek(int fd, off_t offset, int whence)
 {
-    errno = ESPIPE;
-    return (off_t) -1;
+    switch (files[fd].type) {
+	case FTYPE_COMPILED_FILE:
+	    switch (whence) {
+		case SEEK_SET:
+		    files[fd].compiled_file.offset = offset;
+		    break;
+		case SEEK_CUR:
+		    files[fd].compiled_file.offset += offset;
+		    break;
+		case SEEK_END:
+		    files[fd].compiled_file.offset = files[fd].compiled_file.size - offset;
+		    break;
+		default:
+		    errno = EINVAL;
+		    return (off_t)-1;
+	    }
+	    if (files[fd].compiled_file.offset > files[fd].compiled_file.size)
+		files[fd].compiled_file.offset = files[fd].compiled_file.size;
+	    return files[fd].compiled_file.offset;
+	default:
+	    errno = ESPIPE;
+	    return (off_t) -1;
+    }
 }
 
 int fsync(int fd) {
@@ -412,6 +462,12 @@ int fstat(int fd, struct stat *buf)
 	    buf->st_ctime = time(NULL);
 	    return 0;
 	}
+	case FTYPE_COMPILED_FILE: {
+ 	    buf->st_mode = S_IFREG | S_IRUSR;
+	    buf->st_size = files[fd].compiled_file.size - 1;
+ 	    buf->st_blocks = 1;
+ 	    return 0;
+ 	}
 	default:
 	    break;
     }
@@ -419,6 +475,11 @@ int fstat(int fd, struct stat *buf)
     printk("statf(%d): Bad descriptor\n", fd);
     errno = EBADF;
     return -1;
+}
+
+int fstat64(int fd, struct stat *buf)
+{
+    return fstat(fd, buf);
 }
 
 int ftruncate(int fd, off_t length)
@@ -468,35 +529,6 @@ int fcntl(int fd, int cmd, ...)
     }
 }
 
-DIR *opendir(const char *name)
-{
-    DIR *ret;
-    ret = malloc(sizeof(*ret));
-    ret->name = strdup(name);
-    ret->offset = 0;
-    ret->entries = NULL;
-    ret->curentry = -1;
-    ret->nbentries = 0;
-    ret->has_more = 1;
-    return ret;
-}
-
-struct dirent *readdir(DIR *dir)
-{
-    return NULL;
-} 
-
-int closedir(DIR *dir)
-{
-    int i;
-    for (i=0; i<dir->nbentries; i++)
-        free(dir->entries[i]);
-    free(dir->entries);
-    free(dir->name);
-    free(dir);
-    return 0;
-}
-
 /* We assume that only the main thread calls select(). */
 
 static const char file_types[] = {
@@ -510,6 +542,7 @@ static const char file_types[] = {
     [FTYPE_BLK]		= 'B',
     [FTYPE_KBD]		= 'K',
     [FTYPE_FB]		= 'G',
+    [FTYPE_COMPILED_FILE] = 'F',
 };
 #ifdef LIBC_DEBUG
 static void dump_set(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout)
@@ -1156,6 +1189,15 @@ int nice(int inc)
     return 0;
 }
 
+int puts(const char *f)
+{
+    return printf("%s", f);
+}
+
+int getdtablesize(void)
+{
+    return NOFILE;
+}
 
 /* Not supported by FS yet.  */
 unsupported_function_crash(link);

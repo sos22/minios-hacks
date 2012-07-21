@@ -1350,10 +1350,7 @@ httpd_get_conn( httpd_server* hs, int listen_fd, httpd_conn* hc )
     hc->conn_fd = accept( listen_fd, &sa.sa, &sz );
     if ( hc->conn_fd < 0 )
 	{
-	if ( errno == EWOULDBLOCK )
-	    return GC_NO_MORE;
-	syslog( LOG_ERR, "accept - %m" );
-	return GC_FAIL;
+	return GC_NO_MORE;
 	}
     if ( ! sockaddr_check( &sa ) )
 	{

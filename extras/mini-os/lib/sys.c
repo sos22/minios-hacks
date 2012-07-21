@@ -377,17 +377,10 @@ ssize_t writev(int fd, const struct iovec *iov, int iovcnt)
 
     acc = 0;
     for (x = 0; x < iovcnt; x++) {
-	if (iov->iov_len != 0) {
-#ifdef HAVE_LWIP
-	    if (files[fd].type == FTYPE_SOCKET)
-		r = lwip_send(fd, iov[x].iov_base, iov[x].iov_len, x == iovcnt - 1 ? 0 : MSG_MORE);
-	    else
-#endif
-		r = write(fd, iov[x].iov_base, iov[x].iov_len);
-	    if (r <= 0)
-		break;
-	    acc += r;
-	}
+	r = write(fd, iov[x].iov_base, iov[x].iov_len);
+	if (r < 0 || (r == 0 && iov[x].iov_len != 0))
+	    break;
+	acc += r;
     }
     if (acc == 0 && r != 0)
 	return -1;

@@ -118,6 +118,8 @@ int alloc_fd(enum fd_type type)
 	if (files[i].type == FTYPE_NONE) {
 	    files[i].type = type;
 	    pthread_mutex_unlock(&fd_lock);
+	    if (type == FTYPE_GNTMAP)
+		printk("Allocated %d as a gntmap fd\n", i);
 	    return i;
 	}
     }
@@ -406,6 +408,10 @@ int fsync(int fd) {
 int close(int fd)
 {
     printk("close(%d)\n", fd);
+    if (fd < 0 || fd > NOFILE) {
+	errno = EBADF;
+	return -1;
+    }
     switch (files[fd].type) {
         default:
 	    files[fd].type = FTYPE_NONE;
@@ -427,6 +433,10 @@ int close(int fd)
 	    minios_evtchn_close_fd(fd);
             return 0;
 	case FTYPE_GNTMAP:
+	    printk("close gntmap fd %d; gntmap %p, %d entries\n",
+		   fd,
+		   files[fd].gntmap.entries,
+		   files[fd].gntmap.nentries);
 	    minios_gnttab_close_fd(fd);
 	    return 0;
 	case FTYPE_TAP:

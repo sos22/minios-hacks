@@ -2396,3 +2396,58 @@ diff -u -p -r1.29 -r1.30
    return ERR_OK;
  }
 +#endif /* LWIP_HAVE_SLIPIF */
+--- lwip-working/src/api/api_lib.c	2008-01-15 12:44:35.000000000 +0000
++++ lwip-x86_64/src/api/api_lib.c	2012-07-21 13:52:22.000000000 +0100
+@@ -264,20 +264,25 @@ netconn_listen_with_backlog(struct netco
+  * @return the newly accepted netconn or NULL on timeout
+  */
+ struct netconn *
+-netconn_accept(struct netconn *conn)
++netconn_accept(struct netconn *conn, int nonblock)
+ {
+   struct netconn *newconn;
+ 
+   LWIP_ERROR("netconn_accept: invalid conn",       (conn != NULL),                      return NULL;);
+   LWIP_ERROR("netconn_accept: invalid acceptmbox", (conn->acceptmbox != SYS_MBOX_NULL), return NULL;);
+ 
++  if (nonblock) {
++    if (sys_arch_mbox_tryfetch(conn->acceptmbox, (void *)&newconn) == SYS_MBOX_EMPTY)
++      newconn = NULL;
++  } else {
+ #if LWIP_SO_RCVTIMEO
+-  if (sys_arch_mbox_fetch(conn->acceptmbox, (void *)&newconn, conn->recv_timeout) == SYS_ARCH_TIMEOUT) {
+-    newconn = NULL;
+-  } else
++    if (sys_arch_mbox_fetch(conn->acceptmbox, (void *)&newconn, conn->recv_timeout) == SYS_ARCH_TIMEOUT) {
++      newconn = NULL;
++    } else
+ #else
+-  sys_arch_mbox_fetch(conn->acceptmbox, (void *)&newconn, 0);
++      sys_arch_mbox_fetch(conn->acceptmbox, (void *)&newconn, 0);
+ #endif /* LWIP_SO_RCVTIMEO*/
++  }
+   {
+     /* Register event with callback */
+     API_EVENT(conn, NETCONN_EVT_RCVMINUS, 0);
+--- lwip-working/src/api/sockets.c	2012-07-20 13:28:45.000000000 +0100
++++ lwip-x86_64/src/api/sockets.c	2012-07-21 13:53:35.000000000 +0100
+@@ -260,7 +260,7 @@ lwip_accept(int s, struct sockaddr *addr
+   if (!sock)
+     return -1;
+ 
+-  newconn = netconn_accept(sock->conn);
++  newconn = netconn_accept(sock->conn, !!(sock->flags & O_NONBLOCK));
+   if (!newconn) {
+     LWIP_DEBUGF(SOCKETS_DEBUG, ("lwip_accept(%d) failed, err=%d\n", s, sock->conn->err));
+     sock_set_errno(sock, err_to_errno(sock->conn->err));
+--- lwip-working/src/include/lwip/api.h	2008-01-15 12:44:37.000000000 +0000
++++ lwip-x86_64/src/include/lwip/api.h	2012-07-21 13:47:04.000000000 +0100
+@@ -184,7 +184,7 @@ err_t             netconn_connect (struc
+ err_t             netconn_disconnect (struct netconn *conn);
+ err_t             netconn_listen_with_backlog(struct netconn *conn, u8_t backlog);
+ #define netconn_listen(conn) netconn_listen_with_backlog(conn, TCP_DEFAULT_LISTEN_BACKLOG)
+-struct netconn *  netconn_accept  (struct netconn *conn);
++struct netconn *  netconn_accept  (struct netconn *conn, int nonblock);
+ struct netbuf *   netconn_recv    (struct netconn *conn);
+ err_t             netconn_sendto  (struct netconn *conn,
+                                    struct netbuf *buf, struct ip_addr *addr, u16_t port);

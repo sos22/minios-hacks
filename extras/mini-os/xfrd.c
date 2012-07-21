@@ -641,7 +641,7 @@ xfrd_set_timer(xfrd_zone_t* zone, time_t t)
 	/* randomize the time, within 90%-100% of original */
 	/* not later so zones cannot expire too late */
 	/* only for times far in the future */
-	if(t > xfrd_time() + 10) {
+	if(t - xfrd_time() > 10) {
 		time_t extra = t - xfrd_time();
 		time_t base = extra*9/10;
 		t = xfrd_time() + base + /*random()*/13%(extra-base);

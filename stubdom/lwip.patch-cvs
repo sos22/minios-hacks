@@ -2509,3 +2509,14 @@ diff -u -p -r1.29 -r1.30
      /* some callbacks have to be reset if tcp_close is not successful */
      tcp_sent(conn->pcb.tcp, NULL);
      tcp_poll(conn->pcb.tcp, NULL, 4);
+--- src/api/sockets.c	2012-07-22 12:25:43.000000000 +0100
++++ src/api/sockets.c	2012-07-22 12:23:15.000000000 +0100
+@@ -38,6 +38,8 @@
+  *
+  */
+ 
++struct timeval;
++
+ #include "lwip/opt.h"
+ 
+ #if LWIP_SOCKET /* don't build if not configured for use in lwipopts.h */

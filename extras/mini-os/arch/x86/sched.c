@@ -104,7 +104,10 @@ struct thread* arch_create_thread(char *name, void (*function)(void *),
     printk("Thread \"%s\": pointer: 0x%lx, stack: 0x%lx\n", name, thread, 
             thread->stack);
     
-    thread->sp = (unsigned long)thread->stack + STACK_SIZE;
+    /* ABI requires that initial stack be congruent to 8 modulo 16.
+       thread->stack and PAGE_ALIGNED are page aligned, so just
+       subtracting 8 does that. */
+    thread->sp = (unsigned long)thread->stack + STACK_SIZE - 8;
     /* Save pointer to the thread on the stack, used by current macro */
     *((unsigned long *)thread->stack) = (unsigned long)thread;
     

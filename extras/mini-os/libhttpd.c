@@ -2586,7 +2586,7 @@ make_log_entry( httpd_conn* hc, struct timeval* nowP )
 	(void) fflush( hc->hs->logfp );
 #endif
 	}
-    else
+    else if (0)
 	syslog( LOG_INFO,
 	    "%.80s - %.80s \"%.80s %.200s %.80s\" %d %s \"%.200s\" \"%.200s\"",
 	    httpd_ntoa( &hc->client_addr ), ru,

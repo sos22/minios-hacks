@@ -231,8 +231,8 @@ int open(const char *pathname, int flags, ...)
     } else {
 	fd = -1;
 	errno = EIO;
+	printk("open(%s, %d) -> EIO\n", pathname, flags);
     }
-    printk("open(%s, %d) -> %d\n", pathname, flags, fd);
     return fd;
 }
 
@@ -426,7 +426,6 @@ int fsync(int fd) {
 
 int close(int fd)
 {
-    printk("close(%d)\n", fd);
     if (fd >= NOFILE || fd < 0) {
 	errno = EBADF;
 	return -1;
@@ -512,8 +511,8 @@ int stat(const char *path, struct stat *buf)
     } else {
 	res = -1;
 	errno = EIO;
+	printf("stat(%s) -> EIO\n", path);
     }
-    printf("stat(%s, ...) -> %d\n", path, res);
     return res;
 }
 
@@ -610,7 +609,6 @@ int fcntl(int fd, int cmd, ...)
 	default:
 	    break;
     }
-    printk("fcntl(%d, %d, %lx/%lo)\n", fd, cmd, arg, arg);
     errno = ENOSYS;
     return -1;
 }
@@ -1056,7 +1054,6 @@ int accept(int s, struct sockaddr *addr, socklen_t *addrlen)
 	return -1;
     res = alloc_fd(FTYPE_SOCKET);
     files[res].socket.fd = fd;
-    printk("accepted on %d -> %d\n", s, res);
     return res;
 }
 
@@ -1383,8 +1380,8 @@ int readlink(const char *path, char *buf, int bufsize)
     } else {
 	errno = ENOENT;
 	res = -1;
+	printf("readlink(%s) -> ENOENT\n", path);
     }
-    printf("readlink(%s, ..., %d) -> %d\n", path, bufsize, res);
     return res;
 }
 

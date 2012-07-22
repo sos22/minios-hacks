@@ -60,12 +60,6 @@ static void call_main(void *p)
      * crashing. */
     //sleep(1);
 
-#ifndef CONFIG_GRUB
-    //sparse((unsigned long) &__app_bss_start, &__app_bss_end - &__app_bss_start);
-#if defined(HAVE_LWIP) && !defined(CONFIG_QEMU)
-    start_networking();
-#endif
-#endif
     create_thread("pcifront", pcifront_watches, NULL);
 
 #ifdef CONFIG_QEMU
@@ -150,6 +144,23 @@ static void call_main(void *p)
     for (i = 0; i < argc; i++)
 	printf("\"%s\" ", argv[i]);
     printf("\n");
+
+#ifndef CONFIG_GRUB
+    //    sparse((unsigned long) &__app_bss_start, &__app_bss_end - &__app_bss_start);
+#if defined(HAVE_LWIP) && !defined(CONFIG_QEMU)
+    {
+	char *gateway;
+	if (argc > 1 && !strncmp(argv[1], "gw=", 3)) {
+	    gateway = argv[1] + 3;
+	    memmove(argv + 1, argv + 2, sizeof(argv[0]) * argc - 2);
+	    argc--;
+	} else {
+	    gateway = NULL;
+	}
+	start_networking(gateway);
+    }
+#endif
+#endif
 
     __libc_init_array();
     environ = envp;

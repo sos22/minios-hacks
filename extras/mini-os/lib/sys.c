@@ -54,7 +54,7 @@
 #endif
 
 static const unsigned char INDEX_HTML[] =
-    "<html><head><title>Dummy index.html</title></head><body>This is index.html</body></html>";
+    "hello mirage world";
 
 #define debug(fmt, ...) \
 

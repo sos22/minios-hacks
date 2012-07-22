@@ -376,6 +376,7 @@ ssize_t writev(int fd, const struct iovec *iov, int iovcnt)
     }
 
     acc = 0;
+    r = 0;
     for (x = 0; x < iovcnt; x++) {
 	r = write(fd, iov[x].iov_base, iov[x].iov_len);
 	if (r < 0 || (r == 0 && iov[x].iov_len != 0))
@@ -632,7 +633,7 @@ static const char file_types[] = {
 #ifdef LIBC_DEBUG
 static void dump_set(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout)
 {
-    int i, comma;
+    int i, comma, done_one;
 #define printfds(set) do {\
     comma = 0; \
     for (i = 0; i < nfds; i++) { \
@@ -645,18 +646,34 @@ static void dump_set(int nfds, fd_set *readfds, fd_set *writefds, fd_set *except
     } \
 } while (0)
 
-    printk("[");
-    if (readfds)
+    done_one = 0;
+    if (readfds) {
+	printk("readfds = [");
 	printfds(readfds);
-    printk("], [");
-    if (writefds)
+	printk("]");
+	done_one = 1;
+    }
+    if (writefds) {
+	if (done_one)
+	    printk(", ");
+	printk("writefds = [");
 	printfds(writefds);
-    printk("], [");
-    if (exceptfds)
+	printk("]");
+	done_one = 1;
+    }
+    if (exceptfds) {
+	if (done_one)
+	    printk(", ");
+	printk("exceptfds = [");
 	printfds(exceptfds);
-    printk("], ");
-    if (timeout)
-	printk("{ %ld, %ld }", timeout->tv_sec, timeout->tv_usec);
+	printk("]");
+	done_one = 1;
+    }
+    if (timeout) {
+	if (done_one)
+	    printk(", ");
+	printk("timeout = { %ld, %ld }", timeout->tv_sec, timeout->tv_usec);
+    }
 }
 #else
 #define dump_set(nfds, readfds, writefds, exceptfds, timeout)
@@ -811,6 +828,56 @@ static int select_poll(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exce
     return n;
 }
 
+static int do_lwip_select(int nfds, fd_set *readfds, fd_set *writefds,
+			  fd_set *exceptfds, struct timeval *tv)
+{
+    fd_set sock_readfds, sock_writefds, sock_exceptfds;
+    int sock_nfds;
+    int i;
+    int r;
+
+    FD_ZERO(&sock_readfds);
+    FD_ZERO(&sock_writefds);
+    FD_ZERO(&sock_exceptfds);
+    sock_nfds = 0;
+    for (i = 0; i < nfds; i++) {
+	if (readfds && FD_ISSET(i, readfds)) {
+	    FD_SET(files[i].socket.fd, &sock_readfds);
+	    sock_nfds = i+1;
+	}
+	if (writefds && FD_ISSET(i, writefds)) {
+	    FD_SET(files[i].socket.fd, &sock_writefds);
+	    sock_nfds = i+1;
+	}
+	if (exceptfds && FD_ISSET(i, exceptfds)) {
+	    FD_SET(files[i].socket.fd, &sock_exceptfds);
+	    sock_nfds = i+1;
+	}
+    }
+
+    DEBUG("%s(%d, ", __func__, nfds);
+    dump_set(nfds, readfds, writefds, exceptfds, tv);
+    DEBUG(")\n");
+    r = lwip_select(sock_nfds, &sock_readfds, &sock_writefds, &sock_exceptfds, tv);
+    if (r < 0) {
+	DEBUG("%s -> %d\n", __func__, r);
+	return r;
+    }
+    for (i = 0; i < nfds; i++) {
+	if (readfds && FD_ISSET(i, readfds) && !FD_ISSET(files[i].socket.fd, &sock_readfds))
+	    FD_CLR(i, readfds);
+	if (writefds && FD_ISSET(i, writefds) && !FD_ISSET(files[i].socket.fd, &sock_writefds))
+	    FD_CLR(i, writefds);
+	if (exceptfds && FD_ISSET(i, exceptfds) && !FD_ISSET(files[i].socket.fd, &sock_exceptfds))
+	    FD_CLR(i, exceptfds);
+    }
+
+    DEBUG("%s -> ", __func__, nfds);
+    dump_set(nfds, readfds, writefds, exceptfds, tv);
+    DEBUG("\n");
+    return r;
+}
+
 /* The strategy is to
  * - announce that we will maybe sleep
  * - poll a bit ; if successful, return
@@ -829,12 +896,33 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
     DEFINE_WAIT(w4);
     DEFINE_WAIT(w5);
     DEFINE_WAIT(w6);
+    int n_sockets;
+    int n_non_sockets;
 
     assert(thread == main_thread);
 
-    DEBUG("select(%d, ", nfds);
-    dump_set(nfds, readfds, writefds, exceptfds, timeout);
-    DEBUG(");\n");
+    n_sockets = 0;
+    n_non_sockets = 0;
+    for (n = 0; n <= nfds; n++) {
+	if ((readfds && FD_ISSET(n, readfds)) ||
+	    (writefds && FD_ISSET(n, writefds)) ||
+	    (exceptfds && FD_ISSET(n, exceptfds))) {
+	    if (files[n].type == FTYPE_SOCKET)
+		n_sockets++;
+	    else
+		n_non_sockets++;
+	}
+    }
+    if (n_sockets != 0 && n_non_sockets != 0) {
+	static int cntr;
+	if (cntr < 1000) {
+	    printf("WARNING: select combining socket and non-socket FDs (n = %d vs %d); warning %d/1000\n",
+		   n_sockets, n_non_sockets, cntr);
+	    cntr++;
+	}
+    }
+    if (n_non_sockets == 0)
+	return do_lwip_select(nfds, readfds, writefds, exceptfds, timeout);
 
     if (timeout)
 	stop = start + SECONDS(timeout->tv_sec) + timeout->tv_usec * 1000;

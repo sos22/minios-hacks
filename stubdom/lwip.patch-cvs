@@ -2498,3 +2498,14 @@ diff -u -p -r1.29 -r1.30
          if (inet_chksum_pseudo(p, (struct ip_addr *)&(iphdr->src),
                                 (struct ip_addr *)&(iphdr->dest),
                                 IP_PROTO_UDP, p->tot_len) != 0) {
+--- src/api/api_msg.c	2012-07-22 12:25:43.000000000 +0100
++++ src/api/api_msg.c	2012-07-22 12:23:15.000000000 +0100
+@@ -603,7 +603,7 @@ do_close_internal(struct netconn *conn)
+     tcp_accept(conn->pcb.tcp, NULL);
+   } else {
+     tcp_recv(conn->pcb.tcp, NULL);
+-    tcp_accept(conn->pcb.tcp, NULL);
++    //tcp_accept(conn->pcb.tcp, NULL);
+     /* some callbacks have to be reset if tcp_close is not successful */
+     tcp_sent(conn->pcb.tcp, NULL);
+     tcp_poll(conn->pcb.tcp, NULL, 4);

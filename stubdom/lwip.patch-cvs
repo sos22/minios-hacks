@@ -2520,55 +2520,6 @@ diff -u -p -r1.29 -r1.30
  #include "lwip/opt.h"
  
  #if LWIP_SOCKET /* don't build if not configured for use in lwipopts.h */
-diff -Naurp -x '*.o' -x '*~' -x '*.rej' -x '*.orig' lwip/src/core/tcp.c lwip-working/src/core/tcp.c
---- src/core/tcp.c	2012-07-22 12:41:37.000000000 +0100
-+++ src/core/tcp.c	2012-07-22 12:41:27.000000000 +0100
-@@ -413,7 +413,7 @@ tcp_recved(struct tcp_pcb *pcb, u16_t le
-      * process it) but it is necessary to guarantee that the sender can
-      * continue to transmit.
-      */
--    tcp_ack(pcb);
-+    tcp_ack(pcb, 0);
-   } 
-   else if (pcb->flags & TF_ACK_DELAY && pcb->rcv_wnd >= TCP_WND/2) {
-     /* If we can send a window update such that there is a full
-diff -Naurp -x '*.o' -x '*~' -x '*.rej' -x '*.orig' lwip/src/core/tcp_in.c lwip-working/src/core/tcp_in.c
---- src/core/tcp_in.c	2012-07-22 12:41:37.000000000 +0100
-+++ src/core/tcp_in.c	2012-07-22 12:41:27.000000000 +0100
-@@ -1154,7 +1154,7 @@ tcp_receive(struct tcp_pcb *pcb)
- 
- 
-         /* Acknowledge the segment(s). */
--        tcp_ack(pcb);
-+        tcp_ack(pcb, !!(flags & TCP_PSH));
- 
-       } else {
-         /* We get here if the incoming segment is out-of-sequence. */
-diff -Naurp -x '*.o' -x '*~' -x '*.rej' -x '*.orig' lwip/src/include/lwip/tcp.h lwip-working/src/include/lwip/tcp.h
---- src/include/lwip/tcp.h	2008-03-04 13:23:03.000000000 +0000
-+++ src/include/lwip/tcp.h	2012-07-22 12:41:27.000000000 +0100
-@@ -506,13 +506,14 @@ u8_t tcp_segs_free(struct tcp_seg *seg);
- u8_t tcp_seg_free(struct tcp_seg *seg);
- struct tcp_seg *tcp_seg_copy(struct tcp_seg *seg);
- 
--#define tcp_ack(pcb)     if((pcb)->flags & TF_ACK_DELAY) { \
--                            (pcb)->flags &= ~TF_ACK_DELAY; \
--                            (pcb)->flags |= TF_ACK_NOW; \
--                            tcp_output(pcb); \
--                         } else { \
--                            (pcb)->flags |= TF_ACK_DELAY; \
--                         }
-+#define tcp_ack(pcb, force)				   \
-+  if (force || (pcb)->flags & TF_ACK_DELAY) {		   \
-+    (pcb)->flags &= ~TF_ACK_DELAY;			   \
-+    (pcb)->flags |= TF_ACK_NOW;				   \
-+    tcp_output(pcb);					   \
-+  } else {						   \
-+    (pcb)->flags |= TF_ACK_DELAY;			   \
-+  }
- 
- #define tcp_ack_now(pcb) (pcb)->flags |= TF_ACK_NOW; \
-                          tcp_output(pcb)
 diff -Naurp -x '*.o' -x '*~' -x '*.rej' -x '*.orig' lwip/src/api/sockets.c lwip-working/src/api/sockets.c
 --- src/api/sockets.c	2012-07-22 19:40:46.000000000 +0100
 +++ src/api/sockets.c	2012-07-22 19:38:42.000000000 +0100

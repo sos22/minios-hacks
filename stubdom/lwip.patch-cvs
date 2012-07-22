@@ -2569,3 +2569,57 @@ diff -Naurp -x '*.o' -x '*~' -x '*.rej' -x '*.orig' lwip/src/include/lwip/tcp.h 
  
  #define tcp_ack_now(pcb) (pcb)->flags |= TF_ACK_NOW; \
                           tcp_output(pcb)
+diff -Naurp -x '*.o' -x '*~' -x '*.rej' -x '*.orig' lwip/src/api/sockets.c lwip-working/src/api/sockets.c
+--- src/api/sockets.c	2012-07-22 19:40:46.000000000 +0100
++++ src/api/sockets.c	2012-07-22 19:38:42.000000000 +0100
+@@ -817,10 +817,20 @@ lwip_selscan(int maxfdp1, fd_set *readse
+     if (FD_ISSET(i, readset)) {
+       /* See if netconn of this socket is ready for read */
+       p_sock = get_socket(i);
+-      if (p_sock && (p_sock->lastdata || p_sock->rcvevent)) {
+-        FD_SET(i, &lreadset);
+-        LWIP_DEBUGF(SOCKETS_DEBUG, ("lwip_selscan: fd=%d ready for reading\n", i));
+-        nready++;
++      if (p_sock) {
++	if (p_sock->conn->state == NETCONN_LISTEN) {
++	  if (sys_arch_mbox_ready(p_sock->conn->acceptmbox)) {
++	    FD_SET(i, &lreadset);
++	    LWIP_DEBUGF(SOCKETS_DEBUG, ("lwip_selscan: fd=%d ready for reading\n", i));
++	    nready++;
++	  }
++	} else {
++	  if (p_sock->lastdata || p_sock->rcvevent) {
++	    FD_SET(i, &lreadset);
++	    LWIP_DEBUGF(SOCKETS_DEBUG, ("lwip_selscan: fd=%d ready for reading\n", i));
++	    nready++;
++	  }
++	}
+       }
+     }
+     if (FD_ISSET(i, writeset)) {
+diff -Naurp -x '*.o' -x '*~' -x '*.rej' -x '*.orig' lwip/src/core/tcp_in.c lwip-working/src/core/tcp_in.c
+--- src/core/tcp_in.c	2012-07-22 19:40:46.000000000 +0100
++++ src/core/tcp_in.c	2012-07-22 19:39:08.000000000 +0100
+@@ -6,7 +6,10 @@
+  *
+  * These functions are generally called in the order (ip_input() ->)
+  * tcp_input() -> * tcp_process() -> tcp_receive() (-> application).
+- * 
++ *
++ * (That's the order in which functions are called; it doesn't imply
++ * that e.g. tcp_receive indicates stuff to the application (which is
++ * actually done by tcp_input)).
+  */
+ 
+ /*
+diff -Naurp -x '*.o' -x '*~' -x '*.rej' -x '*.orig' lwip/src/include/lwip/sys.h lwip-working/src/include/lwip/sys.h
+--- src/include/lwip/sys.h	2008-01-15 12:44:37.000000000 +0000
++++ src/include/lwip/sys.h	2012-07-22 19:39:24.000000000 +0100
+@@ -128,6 +128,7 @@ sys_mbox_t sys_mbox_new(int size);
+ void sys_mbox_post(sys_mbox_t mbox, void *msg);
+ err_t sys_mbox_trypost(sys_mbox_t mbox, void *msg);
+ u32_t sys_arch_mbox_fetch(sys_mbox_t mbox, void **msg, u32_t timeout);
++u32_t sys_arch_mbox_ready(sys_mbox_t mbox);
+ #ifndef sys_arch_mbox_tryfetch /* Allow port to override with a macro */
+ u32_t sys_arch_mbox_tryfetch(sys_mbox_t mbox, void **msg);
+ #endif

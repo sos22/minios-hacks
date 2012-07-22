@@ -210,6 +210,14 @@ uint32_t sys_arch_mbox_tryfetch(sys_mbox_t mbox, void **msg) {
     return 0;
 }
 
+uint32_t sys_arch_mbox_ready(sys_mbox_t mbox) {
+    if (mbox == SYS_MBOX_NULL)
+	return 0;
+    if (mbox->read_sem.count == 0)
+	return 0;
+    else
+	return 1;
+}
 
 /* Returns a pointer to the per-thread sys_timeouts structure. In lwIP,
  * each thread has a list of timeouts which is repressented as a linked

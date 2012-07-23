@@ -101,25 +101,28 @@ read_zone(namedb_type *db, uint32_t zone_count, zone_type **zones)
 static int
 read_rdata_atom(namedb_type *db, uint16_t type, int index, uint32_t domain_count, domain_type **domains, rdata_atom_type *result)
 {
-	uint8_t data[65536];
-
 	if (rdata_atom_is_domain(type, index)) {
 		result->domain = read_domain(db, domain_count, domains);
 		if (!result->domain)
 			return 0;
 	} else {
 		uint16_t size;
+		char *data;
 
 		if (fread(&size, sizeof(size), 1, db->fd) != 1)
 			return 0;
 		size = ntohs(size);
-		if (fread(data, sizeof(uint8_t), size, db->fd) != size)
+		data = malloc(sizeof(uint8_t) * size);
+		if (fread(data, sizeof(uint8_t), size, db->fd) != size) {
+			free(data);
 			return 0;
+		}
 
 		result->data = (uint16_t *) region_alloc(
 			db->region, sizeof(uint16_t) + size);
 		memcpy(result->data, &size, sizeof(uint16_t));
 		memcpy((uint8_t *) result->data + sizeof(uint16_t), data, size);
+		free(data);
 	}
 
 	return 1;

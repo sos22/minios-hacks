@@ -1,6 +1,8 @@
 #ifndef _POSIX_SYS_SOCKET_H_
 #define _POSIX_SYS_SOCKET_H_
 
+struct timeval;
+
 #include <fcntl.h>
 #include <lwip/sockets.h>
 

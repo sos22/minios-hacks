@@ -274,6 +274,10 @@ int isatty(int fd)
 
 int read(int fd, void *buf, size_t nbytes)
 {
+    if (fd < 0 || fd >= NOFILE) {
+	fd = EBADF;
+	return -1;
+    }
     switch (files[fd].type) {
         case FTYPE_SAVEFILE:
 	case FTYPE_CONSOLE: {
@@ -345,6 +349,10 @@ int read(int fd, void *buf, size_t nbytes)
 
 int write(int fd, const void *buf, size_t nbytes)
 {
+    if (fd < 0 || fd >= NOFILE) {
+	fd = EBADF;
+	return -1;
+    }
     switch (files[fd].type) {
         case FTYPE_SAVEFILE: {
                 int ret = 0, tot = nbytes;
@@ -375,6 +383,10 @@ int write(int fd, const void *buf, size_t nbytes)
 
 off_t lseek(int fd, off_t offset, int whence)
 {
+    if (fd < 0 || fd >= NOFILE) {
+	fd = EBADF;
+	return -1;
+    }
     switch (files[fd].type) {
 	case FTYPE_COMPILED_FILE:
 	    switch (whence) {
@@ -487,6 +499,10 @@ int stat(const char *path, struct stat *buf)
 
 int fstat(int fd, struct stat *buf)
 {
+    if (fd < 0 || fd >= NOFILE) {
+	fd = EBADF;
+	return -1;
+    }
     init_stat(buf);
     switch (files[fd].type) {
 	case FTYPE_SAVEFILE:
@@ -556,6 +572,10 @@ int fcntl(int fd, int cmd, ...)
     arg = va_arg(ap, long);
     va_end(ap);
 
+    if (fd < 0 || fd >= NOFILE) {
+	fd = EBADF;
+	return -1;
+    }
     switch (cmd) {
 #ifdef HAVE_LWIP
 	case F_SETFL:
